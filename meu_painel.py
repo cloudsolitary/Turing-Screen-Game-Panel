@@ -39,6 +39,7 @@ estado_app = {
     "jogos_plataforma": "todas",
     "modulo_noticias": True,
     "modulo_reddit": True,
+    "modulo_promocoes": True,
     "lista_subreddits": ['emulation', 'PiratedGames', 'gadgets', 'SBCGaming'],
     "tempo_slide": 12,
     "porta_com": "COM9",
@@ -112,6 +113,51 @@ def buscar_jogos_gratis():
                 })
             if len(jogos) >= 5: break
         return jogos
+    except: return []
+
+import random
+
+def buscar_promocoes_steam():
+    if not estado_app.get('modulo_promocoes', True): return []
+    
+    # storeID=1 (Steam), onSale=1, metacritic=80+
+    url = "https://www.cheapshark.com/api/1.0/deals?storeID=1&onSale=1&metacritic=80&steamRating=80"
+    
+    try:
+        res = requests.get(url, headers=HEADERS_NAVEGADOR, timeout=10).json()
+        promos = []
+        
+        # Embaralha os resultados para mostrar jogos diferentes a cada ciclo
+        if len(res) > 5:
+            res_filtrado = random.sample(res, 5)
+        else:
+            res_filtrado = res
+            
+        for p in res_filtrado:
+            titulo = p.get('title', '')
+            preco_normal = p.get('normalPrice', '0')
+            preco_venda = p.get('salePrice', '0')
+            desconto = float(p.get('savings', '0'))
+            steam_count = p.get('steamRatingCount', '0')
+            steam_perc = p.get('steamRatingPercent', '0')
+            appid = p.get('steamAppID', '')
+            
+            # Usar imagem de alta qualidade da Steam
+            img_url = p.get('thumb', '')
+            if appid:
+                img_url = f"https://cdn.akamai.steamstatic.com/steam/apps/{appid}/header.jpg"
+
+            promos.append({
+                'tipo': 'STEAM_PROMO', 
+                'titulo': titulo, 
+                'img': img_url,
+                'preco_normal': preco_normal,
+                'preco': preco_venda,
+                'desconto': f"-{int(desconto)}%",
+                'score': p.get('metacriticScore', '80')
+            })
+            
+        return promos
     except: return []
 
 def buscar_gamevicio():
@@ -267,6 +313,44 @@ def criar_layout(item):
         else:
             draw.rounded_rectangle([320, 250, 460, 300], fill=(17, 17, 27, 230), radius=8)
             draw.text((335, 260), "GRÁTIS!", font=f_gratis, fill=(166, 227, 161, 255))
+
+        img_final = Image.alpha_composite(fundo, camada).convert('RGB')
+        return img_final.rotate(rotacao, expand=True)
+
+    # LAYOUT 1.5: PROMOÇÕES STEAM
+    elif item['tipo'] == 'STEAM_PROMO':
+        try:
+            res = requests.get(item['img'], timeout=10)
+            capa = Image.open(BytesIO(res.content)).convert("RGB")
+            fundo = ImageOps.fit(capa, (480, 320), Image.Resampling.LANCZOS).convert('RGBA')
+        except: fundo = Image.new('RGBA', (480, 320), color='#1e1e2e')
+
+        camada = Image.new('RGBA', (480, 320), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(camada)
+
+        # Selo Metacritic
+        draw.rounded_rectangle([20, 20, 75, 50], fill=(250, 208, 0, 220), radius=6)
+        draw.text((28, 26), f"M {item['score']}", font=f_plat, fill=(0, 0, 0, 255))
+
+        # Loja Steam
+        draw.rounded_rectangle([310, 20, 460, 50], fill=(24, 24, 37, 220), radius=6)
+        draw.text((325, 26), "🎮 Promoção Steam", font=f_plat, fill=(137, 207, 240, 255))
+        
+        # Caixa de Preços
+        draw.rounded_rectangle([250, 230, 460, 300], fill=(17, 17, 27, 230), radius=8)
+        
+        # Etiqueta de % Desconto
+        draw.rounded_rectangle([260, 245, 335, 285], fill=(76, 175, 80, 255), radius=4)
+        draw.text((265, 252), item['desconto'], font=f_titulo, fill=(255, 255, 255, 255))
+        
+        # Preço Cortado
+        texto_de = f"De: ${item['preco_normal']}"
+        draw.text((345, 238), texto_de, font=f_pequena, fill=(166, 173, 200, 255))
+        comp = len(texto_de) * 8
+        draw.line([(345, 247), (345 + comp, 247)], fill=(243, 139, 168, 255), width=2)
+        
+        # Preço Novo Promocional
+        draw.text((345, 260), f"${item['preco']}", font=f_gratis, fill=(166, 227, 161, 255))
 
         img_final = Image.alpha_composite(fundo, camada).convert('RGB')
         return img_final.rotate(rotacao, expand=True)
@@ -430,9 +514,10 @@ def run_worker_cycle():
     while is_running and not force_restart:
         try:
             jogos = buscar_jogos_gratis()
+            promos = buscar_promocoes_steam()
             noticias = buscar_gamevicio()
             reddit = buscar_reddit_multiplos() 
-            conteudo = jogos + noticias + reddit
+            conteudo = promos + jogos + noticias + reddit
             
             if not conteudo:
                 update_preview(gerar_tela_padrao("Sem conteúdo ativo."))
