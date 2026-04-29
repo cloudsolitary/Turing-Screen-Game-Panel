@@ -1,5 +1,8 @@
 import os
 import sys
+import sys
+sys.stdout.reconfigure(encoding='utf-8')
+
 import time
 import requests
 import feedparser
@@ -75,10 +78,9 @@ def buscar_jogos_gratis():
     
     url = "https://www.gamerpower.com/api/giveaways?type=game"
     plat_filter = estado_app.get('jogos_plataforma', 'todas').lower()
-    if plat_filter != 'todas':
-        url += f"&platform={plat_filter}"
-    else:
-        url += "&platform=pc"
+    
+    # A API não documenta bem filtros compostos. Busca tudo de PC e filtramos manual:
+    url += "&platform=pc"
         
     try:
         res = requests.get(url, headers=HEADERS_NAVEGADOR, timeout=10).json()
@@ -88,11 +90,18 @@ def buscar_jogos_gratis():
         for j in res:
             plat = j.get('platforms', '')
             titulo = j.get('title', '')
+            
+            loja = None
+            if 'Steam' in plat: loja = 'Steam'
+            elif 'Epic' in plat: loja = 'Epic Games'
+            
+            if not loja: continue # Ignora jogos que não são nem Steam nem Epic (ex: GOG, Itchio)
+            
+            if plat_filter == 'steam' and loja != 'Steam': continue
+            if plat_filter == 'epic' and loja != 'Epic Games': continue
+            
             if titulo not in titulos_vistos:
                 titulos_vistos.add(titulo)
-                loja = 'PC'
-                if 'Steam' in plat: loja = 'Steam'
-                elif 'Epic' in plat: loja = 'Epic Games'
                 
                 jogos.append({
                     'tipo': 'JOGO', 
@@ -375,10 +384,11 @@ def auto_descobrir_com():
         return portas[0].device
     except: return None
 
+display_global = None
+
 def run_worker_cycle():
-    global force_restart
+    global force_restart, display_global
     print("[Worker] Iniciando ciclo (buscando hardware e dados)...")
-    display = None
     
     porta = estado_app.get('porta_com', 'AUTO')
     if porta.upper() == 'AUTO' or not porta.strip():
@@ -393,14 +403,27 @@ def run_worker_cycle():
             print("[LCD] Nenhum dispositivo serial/USB encontrado no PC.")
             porta = "COM9"
 
-    try:
-        display = LcdCommRevA(porta)
-        display.Reset()
-        display.InitializeComm()
-        print(f"✅ Conectado na porta {porta}!")
-    except Exception as e:
-        print(f"⚠️ Aviso LCD: Não foi possível conectar na {porta} ({e}). Mostrarei apenas a Web.")
+    # Se a porta mudou, ou se não tinhamos conexão, precisamos reconectar.
+    if display_global is not None and getattr(display_global, 'com_port', None) != porta:
+        print(f"[LCD] Porta alterada ou reconexão solicitada. Fechando a anterior...")
+        try:
+            display_global.closeSerial()
+        except: pass
+        display_global = None
 
+    if display_global is None:
+        try:
+            display_global = LcdCommRevA(porta)
+            display_global.Reset()
+            display_global.InitializeComm()
+            print(f"✅ Conectado na porta {porta}!")
+        except Exception as e:
+            print(f"⚠️ Aviso LCD: Não foi possível conectar na {porta} ({e}). Mostrarei apenas a Web.")
+            display_global = None
+    else:
+        # Se for um restart simples mantendo a porta, apenas dá um Clear na tela fisicamente
+        try: display_global.Clear()
+        except: pass
 
     update_preview(gerar_tela_padrao("Buscando dados..."))
     
@@ -425,9 +448,9 @@ def run_worker_cycle():
                 img_pronta = criar_layout(item)
                 update_preview(img_pronta)
                 
-                if display:
+                if display_global:
                     try:
-                        display.DisplayPILImage(img_pronta, 0, 0)
+                        display_global.DisplayPILImage(img_pronta, 0, 0)
                     except: pass 
                 
                 t_slide = estado_app.get('tempo_slide', 12)
@@ -442,11 +465,7 @@ def run_worker_cycle():
                 if force_restart or not is_running: break
                 time.sleep(1)
             
-    if display:
-        try:
-            display.Clear()
-        except: pass
-    print("[Worker] Ciclo encerrado.")
+    print("[Worker] Ciclo encerrado ou reiniciando.")
 
 def worker_thread():
     global force_restart
