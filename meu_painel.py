@@ -1,0 +1,522 @@
+import os
+import sys
+import time
+import requests
+import feedparser
+import textwrap
+import re
+import json
+import threading
+from io import BytesIO
+import base64
+from bs4 import BeautifulSoup
+from PIL import Image, ImageDraw, ImageFont, ImageOps
+from flask import Flask, render_template, request, jsonify, send_file, Response
+
+# --- CONFIGURAÇÃO DE CAMINHO ---
+app = Flask(__name__)
+diretorio_atual = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(diretorio_atual)
+
+try:
+    from library.lcd.lcd_comm_rev_a import LcdCommRevA
+except ImportError:
+    print("❌ Erro: Biblioteca 'library' não encontrada.")
+    # No modo build, isso pode não ser fatal para a compilação, mas na execução sim
+    pass
+
+# ==========================================
+# VARIÁVEIS GLOBAIS E ESTADO
+# ==========================================
+ARQUIVO_CONFIG = os.path.join(diretorio_atual, 'painel_config.json')
+
+# Estado padrao que será sobrescrito ao ler o JSON
+estado_app = {
+    "modulo_jogos": True,
+    "jogos_plataforma": "todas",
+    "modulo_noticias": True,
+    "modulo_reddit": True,
+    "lista_subreddits": ['emulation', 'PiratedGames', 'gadgets', 'SBCGaming'],
+    "tempo_slide": 12,
+    "porta_com": "COM9",
+    "rotacao": -90
+}
+
+# Variável para armazenar o preview
+preview_lock = threading.Lock()
+preview_bytes = None
+
+HEADERS_NAVEGADOR = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+}
+
+# ==========================================
+# FUNÇÕES DE CONFIGURAÇÃO
+# ==========================================
+def carregar_configuracao():
+    global estado_app
+    if os.path.exists(ARQUIVO_CONFIG):
+        try:
+            with open(ARQUIVO_CONFIG, 'r', encoding='utf-8') as f:
+                config_salva = json.load(f)
+                estado_app.update(config_salva)
+        except Exception as e:
+            print(f"Erro ao ler config: {e}")
+
+def salvar_configuracao():
+    with open(ARQUIVO_CONFIG, 'w', encoding='utf-8') as f:
+        json.dump(estado_app, f, indent=4)
+
+# ==========================================
+# BUSCADORES DE DADOS
+# ==========================================
+def buscar_jogos_gratis():
+    if not estado_app['modulo_jogos']: return []
+    
+    url = "https://www.gamerpower.com/api/giveaways?type=game"
+    plat_filter = estado_app.get('jogos_plataforma', 'todas').lower()
+    if plat_filter != 'todas':
+        url += f"&platform={plat_filter}"
+    else:
+        url += "&platform=pc"
+        
+    try:
+        res = requests.get(url, headers=HEADERS_NAVEGADOR, timeout=10).json()
+        jogos = []
+        titulos_vistos = set()
+        
+        for j in res:
+            plat = j.get('platforms', '')
+            titulo = j.get('title', '')
+            if titulo not in titulos_vistos:
+                titulos_vistos.add(titulo)
+                loja = 'PC'
+                if 'Steam' in plat: loja = 'Steam'
+                elif 'Epic' in plat: loja = 'Epic Games'
+                
+                jogos.append({
+                    'tipo': 'JOGO', 
+                    'titulo': titulo, 
+                    'img': j.get('thumbnail', ''),
+                    'preco': j.get('worth', 'N/A'),
+                    'loja': loja
+                })
+            if len(jogos) >= 5: break
+        return jogos
+    except: return []
+
+def buscar_gamevicio():
+    if not estado_app['modulo_noticias']: return []
+    
+    url = "https://www.gamevicio.com/"
+    try:
+        res = requests.get(url, headers=HEADERS_NAVEGADOR, timeout=10)
+        soup = BeautifulSoup(res.text, 'html.parser')
+        noticias = []
+        titulos_vistos = set()
+        
+        cards = soup.find_all('div', class_=re.compile(r"e-loop-item"))
+        
+        for card in cards:
+            if 'swiper-slide' in card.get('class', []): continue
+                
+            img = card.find('img')
+            if not img: continue
+                
+            src = ""
+            for attr in ['data-lazy-src', 'data-src', 'src']:
+                val = img.get(attr, '')
+                if val and val.startswith('http'):
+                    src = val
+                    break
+
+            h2 = card.find('h2', class_=re.compile(r"elementor-heading-title"))
+            if not h2: continue
+            titulo = h2.get_text(strip=True)
+
+            tag = "#NOTÍCIA"
+            tags_encontradas = card.find_all('a', rel='tag')
+            if tags_encontradas:
+                tag_texto = tags_encontradas[-1].get_text(strip=True)
+                tag = f"#{tag_texto.upper()}"
+
+            if src and titulo and (titulo not in titulos_vistos):
+                titulos_vistos.add(titulo)
+                noticias.append({
+                    'tipo': 'GAMEVICIO', 
+                    'titulo': titulo, 
+                    'img': src,
+                    'tag': tag
+                })
+            if len(noticias) >= 5: break
+        return noticias
+    except: return []
+
+def buscar_reddit_multiplos():
+    if not estado_app['modulo_reddit']: return []
+    
+    posts_finais = []
+    titulos_vistos = set()
+    subs = estado_app.get('lista_subreddits', [])
+    
+    for subreddit in subs:
+        url = f"https://www.reddit.com/r/{subreddit}/top.rss?t=day"
+        try:
+            resposta = requests.get(url, headers=HEADERS_NAVEGADOR, timeout=10)
+            feed = feedparser.parse(resposta.content)
+            adicionados_neste_sub = 0
+            
+            for e in feed.entries:
+                titulo = e.title
+                if titulo not in titulos_vistos:
+                    autor = e.author.replace('/u/', 'u/') if hasattr(e, 'author') else f'r/{subreddit}'
+                    
+                    img_url = None
+                    if hasattr(e, 'media_thumbnail') and e.media_thumbnail:
+                        img_url = e.media_thumbnail[0]['url']
+                    else:
+                        html_content = e.content[0].value if hasattr(e, 'content') else (e.summary if hasattr(e, 'summary') else "")
+                        if html_content:
+                            soup = BeautifulSoup(html_content, 'html.parser')
+                            img_tag = soup.find('img')
+                            if img_tag and img_tag.get('src'):
+                                img_url = img_tag['src']
+                    
+                    titulos_vistos.add(titulo)
+                    posts_finais.append({
+                        'tipo': 'REDDIT', 
+                        'titulo': titulo, 
+                        'info': autor,
+                        'img': img_url,
+                        'sub': subreddit
+                    })
+                    adicionados_neste_sub += 1
+                if adicionados_neste_sub >= 2: break
+        except: continue
+    return posts_finais
+
+# ==========================================
+# GERADOR DE UI
+# ==========================================
+def desenhar_texto_centralizado(draw, y, texto, fonte, cor_texto, cor_fundo=None):
+    try:
+        bbox = draw.textbbox((0, 0), texto, font=fonte)
+        largura = bbox[2] - bbox[0]
+        altura = bbox[3] - bbox[1]
+    except AttributeError:
+        largura = len(texto) * (fonte.size * 0.6)
+        altura = fonte.size
+    x = max(10, (480 - largura) / 2) 
+    if cor_fundo:
+        draw.rectangle([x - 10, y - 5, x + largura + 10, y + altura + 5], fill=cor_fundo)
+    draw.text((x, y), texto, font=fonte, fill=cor_texto)
+
+def desenhar_etiqueta_topo(draw, x, y, texto, fonte, cor_fundo):
+    try:
+        bbox = draw.textbbox((0, 0), texto, font=fonte)
+        largura = bbox[2] - bbox[0]
+        altura = bbox[3] - bbox[1]
+    except AttributeError:
+        largura = len(texto) * (fonte.size * 0.6)
+        altura = fonte.size
+    draw.rounded_rectangle([x, y, x + largura + 20, y + altura + 16], fill=cor_fundo, radius=4)
+    draw.text((x + 10, y + 6), texto, font=fonte, fill=(255, 255, 255, 255))
+
+def criar_layout(item):
+    try:
+        f_pequena = ImageFont.truetype("arial.ttf", 14)       
+        f_plat = ImageFont.truetype("arialbd.ttf", 16)        
+        f_tipo = ImageFont.truetype("arialbd.ttf", 18)        
+        f_gratis = ImageFont.truetype("arialbd.ttf", 26)      
+        f_titulo = ImageFont.truetype("arialbd.ttf", 20) 
+    except:
+        f_pequena = f_plat = f_tipo = f_gratis = f_titulo = ImageFont.load_default()
+
+    rotacao = estado_app.get('rotacao', -90)
+
+    # LAYOUT 1: JOGOS
+    if item['tipo'] == 'JOGO':
+        try:
+            res = requests.get(item['img'], timeout=10)
+            capa = Image.open(BytesIO(res.content)).convert("RGB")
+            fundo = ImageOps.fit(capa, (480, 320), Image.Resampling.LANCZOS).convert('RGBA')
+        except: fundo = Image.new('RGBA', (480, 320), color='#1e1e2e')
+
+        camada = Image.new('RGBA', (480, 320), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(camada)
+
+        draw.rounded_rectangle([340, 20, 460, 50], fill=(24, 24, 37, 220), radius=6)
+        draw.text((355, 26), f"🎮 {item['loja']}", font=f_plat, fill=(203, 166, 247, 255))
+        
+        preco = item['preco']
+        if preco != 'N/A' and preco != 'Free':
+            draw.rounded_rectangle([310, 230, 460, 300], fill=(17, 17, 27, 230), radius=8)
+            draw.text((325, 238), f"De: {preco}", font=f_pequena, fill=(166, 173, 200, 255))
+            comp = len(preco) * 8 + 25
+            draw.line([(325, 247), (325 + comp, 247)], fill=(243, 139, 168, 255), width=2)
+            draw.text((325, 260), "GRÁTIS!", font=f_gratis, fill=(166, 227, 161, 255))
+        else:
+            draw.rounded_rectangle([320, 250, 460, 300], fill=(17, 17, 27, 230), radius=8)
+            draw.text((335, 260), "GRÁTIS!", font=f_gratis, fill=(166, 227, 161, 255))
+
+        img_final = Image.alpha_composite(fundo, camada).convert('RGB')
+        return img_final.rotate(rotacao, expand=True)
+
+    # LAYOUT 2: GAMEVICIO
+    elif item['tipo'] == 'GAMEVICIO':
+        try:
+            res = requests.get(item['img'], timeout=10)
+            capa = Image.open(BytesIO(res.content)).convert("RGB")
+            fundo = ImageOps.fit(capa, (480, 320), Image.Resampling.LANCZOS).convert('RGBA')
+        except: fundo = Image.new('RGBA', (480, 320), color='#000000')
+
+        camada = Image.new('RGBA', (480, 320), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(camada)
+
+        desenhar_etiqueta_topo(draw, 20, 20, item['tag'], f_plat, (211, 47, 47, 230))
+        draw.rectangle([0, 220, 480, 320], fill=(0, 0, 0, 160))
+        
+        linhas_titulo = textwrap.wrap(item['titulo'], width=45)[:2]
+        
+        altura_linha = 26
+        y_atual = 220 + (100 - (len(linhas_titulo) * altura_linha)) // 2
+
+        for linha in linhas_titulo:
+            desenhar_texto_centralizado(draw, y_atual, linha, f_titulo, cor_texto=(255, 255, 255, 255))
+            y_atual += altura_linha
+
+        img_final = Image.alpha_composite(fundo, camada).convert('RGB')
+        return img_final.rotate(rotacao, expand=True)
+
+    # LAYOUT 3: REDDIT
+    elif item['tipo'] == 'REDDIT':
+        tag_texto = f"r/{item['sub']}"
+        if item.get('img'):
+            try:
+                res = requests.get(item['img'], timeout=10)
+                capa = Image.open(BytesIO(res.content)).convert("RGB")
+                fundo = ImageOps.fit(capa, (480, 320), Image.Resampling.LANCZOS).convert('RGBA')
+            except: fundo = Image.new('RGBA', (480, 320), color='#1A1A1B')
+
+            camada = Image.new('RGBA', (480, 320), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(camada)
+
+            desenhar_etiqueta_topo(draw, 20, 20, tag_texto, f_plat, (255, 69, 0, 230))
+            draw.rectangle([0, 220, 480, 320], fill=(0, 0, 0, 160))
+            
+            linhas_titulo = textwrap.wrap(item['titulo'], width=45)[:2]
+            altura_linha = 26
+            altura_total = (len(linhas_titulo) * altura_linha) + 18
+            y_atual = 220 + (100 - altura_total) // 2
+
+            for linha in linhas_titulo: 
+                desenhar_texto_centralizado(draw, y_atual, linha, f_titulo, cor_texto=(255, 255, 255, 255))
+                y_atual += altura_linha
+                
+            desenhar_texto_centralizado(draw, y_atual, f"por {item['info']}", f_pequena, cor_texto=(200, 200, 200, 255))
+
+            img_final = Image.alpha_composite(fundo, camada).convert('RGB')
+            return img_final.rotate(rotacao, expand=True)
+        else:
+            img_final = Image.new('RGB', (480, 320), color='#1A1A1B')
+            draw = ImageDraw.Draw(img_final)
+
+            draw.rectangle([0, 0, 480, 15], fill='#FF4500')
+            desenhar_etiqueta_topo(draw, 20, 35, tag_texto, f_plat, (255, 69, 0, 255))
+            draw.text((20, 85), f"Postado por {item['info']}", font=f_pequena, fill='#818384')
+
+            linhas = textwrap.wrap(item['titulo'], width=40)
+            y = 130
+            for linha in linhas[:3]:
+                draw.text((20, y), linha, font=f_titulo, fill='#D7DADC')
+                y += 32
+            return img_final.rotate(rotacao, expand=True)
+
+def gerar_tela_padrao(mensagem="Turing Smart Screen"):
+    img_final = Image.new('RGB', (480, 320), color='#121212')
+    draw = ImageDraw.Draw(img_final)
+    try:
+        f_titulo = ImageFont.truetype("arialbd.ttf", 26) 
+    except:
+        f_titulo = ImageFont.load_default()
+    
+    desenhar_texto_centralizado(draw, 140, mensagem, f_titulo, cor_texto=(255, 255, 255, 255))
+    return img_final.rotate(estado_app.get('rotacao', -90), expand=True)
+
+# ==========================================
+# WORKER BACKGROUND (LCD & PREVIEW)
+# ==========================================
+import serial.tools.list_ports
+
+is_running = True
+force_restart = False
+
+def update_preview(img_pil):
+    global preview_bytes
+    img_byte_arr = BytesIO()
+    
+    # Desfaz a rotação da imagem apenas para o web preview ficar natural (paisagem 480x320)
+    rotacao_atual = estado_app.get('rotacao', -90)
+    if rotacao_atual != 0:
+        img_pil = img_pil.rotate(-rotacao_atual, expand=True)
+        
+    img_pil.save(img_byte_arr, format='JPEG', quality=85)
+    with preview_lock:
+        preview_bytes = img_byte_arr.getvalue()
+
+def auto_descobrir_com():
+    try:
+        portas = list(serial.tools.list_ports.comports())
+        if not portas: return None
+        for p in portas:
+            desc = p.description.upper()
+            if "USB" in desc or "CH340" in desc or "UART" in desc or "SERIAL" in desc:
+                return p.device
+        return portas[0].device
+    except: return None
+
+def run_worker_cycle():
+    global force_restart
+    print("[Worker] Iniciando ciclo (buscando hardware e dados)...")
+    display = None
+    
+    porta = estado_app.get('porta_com', 'AUTO')
+    if porta.upper() == 'AUTO' or not porta.strip():
+        print("[LCD] Buscando porta USB automaticamente...")
+        porta_descoberta = auto_descobrir_com()
+        if porta_descoberta:
+            porta = porta_descoberta
+            print(f"[LCD] Encontrado dispositivo na porta: {porta}")
+            estado_app['porta_com'] = porta
+            salvar_configuracao()
+        else:
+            print("[LCD] Nenhum dispositivo serial/USB encontrado no PC.")
+            porta = "COM9"
+
+    try:
+        display = LcdCommRevA(porta)
+        display.Reset()
+        display.InitializeComm()
+        print(f"✅ Conectado na porta {porta}!")
+    except Exception as e:
+        print(f"⚠️ Aviso LCD: Não foi possível conectar na {porta} ({e}). Mostrarei apenas a Web.")
+
+
+    update_preview(gerar_tela_padrao("Buscando dados..."))
+    
+    while is_running and not force_restart:
+        try:
+            jogos = buscar_jogos_gratis()
+            noticias = buscar_gamevicio()
+            reddit = buscar_reddit_multiplos() 
+            conteudo = jogos + noticias + reddit
+            
+            if not conteudo:
+                update_preview(gerar_tela_padrao("Sem conteúdo ativo."))
+                # Aguarda até o próximo ciclo ou até dar restart
+                for _ in range(5):
+                    if force_restart or not is_running: break
+                    time.sleep(1)
+                continue
+            
+            for item in conteudo:
+                if not is_running or force_restart: break
+                
+                img_pronta = criar_layout(item)
+                update_preview(img_pronta)
+                
+                if display:
+                    try:
+                        display.DisplayPILImage(img_pronta, 0, 0)
+                    except: pass 
+                
+                t_slide = estado_app.get('tempo_slide', 12)
+                t_elapsed = 0
+                while t_elapsed < t_slide and is_running and not force_restart:
+                    time.sleep(1)
+                    t_elapsed += 1
+
+        except Exception as e:
+            print(f"Erro no loop principal: {e}")
+            for _ in range(5):
+                if force_restart or not is_running: break
+                time.sleep(1)
+            
+    if display:
+        try:
+            display.Clear()
+        except: pass
+    print("[Worker] Ciclo encerrado.")
+
+def worker_thread():
+    global force_restart
+    while is_running:
+        force_restart = False
+        run_worker_cycle()
+        if is_running and force_restart:
+            print("[Worker] Reinicialização solicitada, religando...")
+            time.sleep(0.5)
+
+# ==========================================
+# ROTAS DO FLASK (WEB API)
+# ==========================================
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/api/config', methods=['GET'])
+def get_config():
+    return jsonify(estado_app)
+
+@app.route('/api/config', methods=['POST'])
+def save_config():
+    dados = request.json
+    if dados:
+        estado_app.update(dados)
+        salvar_configuracao()
+        return jsonify({"status": "sucesso"}), 200
+    return jsonify({"status": "erro"}), 400
+
+@app.route('/api/preview')
+def get_preview():
+    with preview_lock:
+        b = preview_bytes
+    if b:
+        return Response(b, mimetype='image/jpeg')
+    else:
+        return Response(b"", status=404)
+
+@app.route('/api/shutdown', methods=['POST'])
+def shutdown():
+    global is_running
+    is_running = False
+    func = request.environ.get('werkzeug.server.shutdown')
+    if func is None:
+        os._exit(0)
+    func()
+    return jsonify({"status": "desligando"}), 200
+
+@app.route('/api/restart', methods=['POST'])
+def restart():
+    global force_restart
+    force_restart = True
+    return jsonify({"status": "reiniciando"}), 200
+
+# ==========================================
+# INICIALIZAÇÃO
+# ==========================================
+def main():
+    carregar_configuracao()
+    # Inicia a thread de LCD
+    t = threading.Thread(target=worker_thread, daemon=True)
+    t.start()
+    
+    print("=======================================")
+    print("  🌐 Acesso WEB: http://localhost:5000 ")
+    print("=======================================")
+    
+    # Inicia o servidor Web
+    app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
+
+if __name__ == "__main__":
+    main()

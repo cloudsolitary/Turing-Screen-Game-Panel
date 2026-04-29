@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Painel Turing - Gamer Hub</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        dark: '#121212',
+                        darker: '#0a0a0a',
+                        primary: '#6d28d9', // Roxo gamer
+                        accent: '#10b981', // Verde sucesso
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .glass {
+            background: rgba(24, 24, 27, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        /* Custom Switch */
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 48px;
+            height: 24px;
+        }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #3f3f46;
+            transition: .4s;
+            border-radius: 24px;
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 18px; width: 18px;
+            left: 3px; bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .slider { background-color: #10b981; }
+        input:checked + .slider:before { transform: translateX(24px); }
+        
+        .lcd-frame {
+            border: 12px solid #1a1a1a;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            aspect-ratio: 480 / 320;
+            background-color: #000;
+            position: relative;
+            overflow: hidden;
+            max-width: 480px;
+            width: 100%;
+        }
+    </style>
+</head>
+<body class="bg-darker text-gray-100 min-h-screen">
+
+<div class="container mx-auto px-4 py-8">
+    <header class="mb-8 flex justify-between items-center bg-zinc-900 p-4 rounded-xl shadow-lg border border-zinc-800">
+        <h1 class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary to-accent">Hub Gamer - Painel de Controle</h1>
+        <button onclick="desligarServidor()" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded font-medium transition-colors">
+            Desligar Sistema
+        </button>
+    </header>
+
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        
+        <!-- Lado Esquerdo: Preview -->
+        <div class="lg:col-span-5 flex flex-col items-center">
+            <h2 class="text-xl font-semibold mb-4 text-gray-300">Preview em Tempo Real</h2>
+            <div class="lcd-frame">
+                <img id="previewImage" src="/api/preview" alt="Tela Turing" class="w-full h-full object-cover">
+                <!-- Status Overlay (optional) -->
+                <div id="statusOverlay" class="absolute inset-0 flex items-center justify-center bg-black bg-opacity-70 hidden">
+                    <span class="text-white font-bold">Sem conexão</span>
+                </div>
+            </div>
+            <p class="mt-4 text-sm text-gray-500">A imagem visualizada é enviada diretamente ao seu hardware LCD e atualiza a cada 1 segundo nesta página.</p>
+        </div>
+
+        <!-- Lado Direito: Configurações -->
+        <div class="lg:col-span-7 glass rounded-2xl p-6 shadow-2xl">
+            <h2 class="text-xl font-semibold mb-6 border-b border-zinc-700 pb-2">Configurações Dinâmicas</h2>
+            
+            <form id="configForm" class="space-y-6">
+                <!-- Módulo Ativos -->
+                <div>
+                    <h3 class="text-lg text-primary mb-3 font-medium">Módulos Ativos</h3>
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <div class="bg-zinc-800/50 p-4 rounded-xl flex justify-between items-center border border-zinc-700/50 hover:border-zinc-500 transition-colors">
+                            <span>🎮 Jogos Grátis</span>
+                            <label class="switch">
+                                <input type="checkbox" id="modulo_jogos" name="modulo_jogos">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <div class="bg-zinc-800/50 p-4 rounded-xl flex justify-between items-center border border-zinc-700/50 hover:border-zinc-500 transition-colors">
+                            <span>📰 GameVicio</span>
+                            <label class="switch">
+                                <input type="checkbox" id="modulo_noticias" name="modulo_noticias">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <div class="bg-zinc-800/50 p-4 rounded-xl flex justify-between items-center border border-zinc-700/50 hover:border-zinc-500 transition-colors">
+                            <span>👾 Reddit Top</span>
+                            <label class="switch">
+                                <input type="checkbox" id="modulo_reddit" name="modulo_reddit">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Config de Subreddits -->
+                <div>
+                    <h3 class="text-lg text-primary mb-3 font-medium">Subreddits Acompanhados</h3>
+                    <div class="flex space-x-2 mb-3">
+                        <input type="text" id="newSubreddit" placeholder="Ex: pcgaming (sem o r/)" class="flex-1 bg-zinc-800 border border-zinc-700 text-white rounded px-4 py-2 focus:outline-none focus:border-primary">
+                        <button type="button" onclick="addSubreddit()" class="bg-primary hover:bg-violet-600 text-white px-4 py-2 rounded transition-colors font-medium">Adicionar</button>
+                    </div>
+                    <div id="subredditsContainer" class="flex flex-wrap gap-2">
+                        <!-- Chips will be appended here -->
+                    </div>
+                </div>
+
+                <!-- Config Extras -->
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-400 mb-1">Plataforma de Jogos</label>
+                        <select id="jogos_plataforma" name="jogos_plataforma" class="w-full bg-zinc-800 border border-zinc-700 text-white rounded px-3 py-2 outline-none focus:border-primary">
+                            <option value="todas">Todas (Steam + Epic)</option>
+                            <option value="Steam">Apenas Steam</option>
+                            <option value="Epic">Apenas Epic Games</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-400 mb-1">Tempo por Slide (segundos)</label>
+                        <input type="number" id="tempo_slide" name="tempo_slide" min="5" max="60" class="w-full bg-zinc-800 border border-zinc-700 text-white rounded px-3 py-2 outline-none focus:border-primary">
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-400 mb-1">Porta COM</label>
+                        <input type="text" id="porta_com" name="porta_com" class="w-full bg-zinc-800 border border-zinc-700 text-white rounded px-3 py-2 outline-none focus:border-primary">
+                    </div>
+                </div>
+
+                <!-- Save Button -->
+                <div class="pt-4 flex justify-end space-x-3">
+                    <span id="saveStatus" class="mr-4 self-center text-accent font-medium hidden">Salvo!</span>
+                    
+                    <button type="button" onclick="reiniciarScript()" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg shadow-lg font-bold transition-all transform active:scale-95">
+                        Reiniciar Script
+                    </button>
+
+                    <button type="button" onclick="salvarConfiguracoes()" class="bg-accent hover:bg-emerald-600 text-white px-8 py-3 rounded-lg shadow-lg font-bold transition-all transform active:scale-95">
+                        Salvar Alterações
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentSubreddits = [];
+
+    // Busca configurações atuais do servidor
+    async function loadConfig() {
+        try {
+            const res = await fetch('/api/config');
+            const data = await res.json();
+            
+            document.getElementById('modulo_jogos').checked = data.modulo_jogos;
+            document.getElementById('modulo_noticias').checked = data.modulo_noticias;
+            document.getElementById('modulo_reddit').checked = data.modulo_reddit;
+            
+            document.getElementById('jogos_plataforma').value = data.jogos_plataforma;
+            document.getElementById('tempo_slide').value = data.tempo_slide;
+            document.getElementById('porta_com').value = data.porta_com;
+
+            currentSubreddits = data.lista_subreddits || [];
+            renderSubreddits();
+        } catch (e) {
+            console.error("Erro ao carregar configurações", e);
+        }
+    }
+
+    function renderSubreddits() {
+        const container = document.getElementById('subredditsContainer');
+        container.innerHTML = '';
+        currentSubreddits.forEach((sub, index) => {
+            const el = document.createElement('div');
+            el.className = "bg-zinc-800 border border-zinc-600 py-1 px-3 rounded-full flex items-center text-sm";
+            el.innerHTML = `
+                <span class="text-gray-300 mr-2">r/${sub}</span>
+                <button type="button" onclick="removeSubreddit(${index})" class="text-red-400 hover:text-red-300 font-bold focus:outline-none">&times;</button>
+            `;
+            container.appendChild(el);
+        });
+    }
+
+    function addSubreddit() {
+        const input = document.getElementById('newSubreddit');
+        const val = input.value.trim().replace(/^r\//, '');
+        if (val && !currentSubreddits.includes(val)) {
+            currentSubreddits.push(val);
+            renderSubreddits();
+            input.value = '';
+        }
+    }
+
+    function removeSubreddit(index) {
+        currentSubreddits.splice(index, 1);
+        renderSubreddits();
+    }
+
+    async function salvarConfiguracoes() {
+        const config = {
+            modulo_jogos: document.getElementById('modulo_jogos').checked,
+            modulo_noticias: document.getElementById('modulo_noticias').checked,
+            modulo_reddit: document.getElementById('modulo_reddit').checked,
+            jogos_plataforma: document.getElementById('jogos_plataforma').value,
+            tempo_slide: parseInt(document.getElementById('tempo_slide').value) || 12,
+            porta_com: document.getElementById('porta_com').value,
+            lista_subreddits: currentSubreddits,
+            rotacao: -90
+        };
+
+        try {
+            const res = await fetch('/api/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(config)
+            });
+            if (res.ok) {
+                const status = document.getElementById('saveStatus');
+                status.classList.remove('hidden');
+                setTimeout(() => status.classList.add('hidden'), 3000);
+            }
+        } catch(e) {
+            alert("Erro ao salvar!");
+        }
+    }
+
+    async function desligarServidor() {
+        if(confirm("Deseja realmente desligar o aplicativo em background? A tela do LCD apagará e esta janela parará de funcionar.")) {
+            try {
+                await fetch('/api/shutdown', {method: 'POST'});
+                document.body.innerHTML = `
+                <div class="flex items-center justify-center min-h-screen">
+                    <h1 class="text-2xl text-red-500 font-bold">Servidor Desligado. Pode fechar esta janela.</h1>
+                </div>`;
+            } catch(e) {}
+        }
+    }
+
+    async function reiniciarScript() {
+        if(confirm("Reiniciar o script? Isso fará a tela resetar e buscar novos dados imediatamente.")) {
+            try {
+                const res = await fetch('/api/restart', {method: 'POST'});
+                if (res.ok) {
+                    alert("Script reiniciado com sucesso! Aguarde os dados carregarem.");
+                }
+            } catch(e) {
+                alert("Erro ao enviar comando de reinício.");
+            }
+        }
+    }
+
+    // Refresh da imagem de preview a cada 1 segundo (usando timestamp pra não pegar cache)
+    setInterval(() => {
+        const img = document.getElementById('previewImage');
+        // Apenas recarrega a url
+        img.src = '/api/preview?t=' + new Date().getTime();
+    }, 1000);
+
+    // Enter to add subreddit
+    document.getElementById('newSubreddit').addEventListener('keypress', function (e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            addSubreddit();
+        }
+    });
+
+    window.onload = loadConfig;
+</script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+    "modulo_jogos": true,
+    "jogos_plataforma": "Steam",
+    "modulo_noticias": true,
+    "modulo_reddit": true,
+    "lista_subreddits": [
+        "emulation",
+        "PiratedGames",
+        "gadgets",
+        "SBCGaming"
+    ],
+    "tempo_slide": 12,
+    "porta_com": "COM9",
+    "rotacao": -90
+}
