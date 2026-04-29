@@ -42,7 +42,7 @@ estado_app = {
     "modulo_promocoes": True,
     "lista_subreddits": ['emulation', 'PiratedGames', 'gadgets', 'SBCGaming'],
     "tempo_slide": 12,
-    "porta_com": "COM9",
+    "porta_com": "AUTO",
     "rotacao": -90
 }
 
@@ -458,15 +458,48 @@ def update_preview(img_pil):
         preview_bytes = img_byte_arr.getvalue()
 
 def auto_descobrir_com():
+    """Detecção robusta da porta COM da tela Turing Smart Screen.
+    Prioridade:
+      1. Identifica pelo serial_number ou VID/PID exato da tela Turing
+      2. Fallback: procura chips CH340/CH341 (conversor USB-Serial comum nessas telas)
+      3. Último recurso: ignora e retorna None (painel continua apenas na web)
+    """
     try:
         portas = list(serial.tools.list_ports.comports())
-        if not portas: return None
+        if not portas:
+            print("[LCD] Nenhuma porta serial encontrada no sistema.")
+            return None
+        
+        print(f"[LCD] Portas seriais encontradas: {[(p.device, p.description, p.vid, p.pid) for p in portas]}")
+        
+        # PRIORIDADE 1: Método exato da biblioteca Turing (serial number ou VID:PID)
         for p in portas:
-            desc = p.description.upper()
-            if "USB" in desc or "CH340" in desc or "UART" in desc or "SERIAL" in desc:
+            if p.serial_number == "USB35INCHIPSV2":
+                print(f"[LCD] ✅ Tela Turing detectada por número de série: {p.device}")
                 return p.device
-        return portas[0].device
-    except: return None
+            if p.vid == 0x1a86 and p.pid == 0x5722:
+                print(f"[LCD] ✅ Tela Turing detectada por VID/PID (1a86:5722): {p.device}")
+                return p.device
+        
+        # PRIORIDADE 2: Chip CH340/CH341 (convertidor USB-Serial usado por essas telas)
+        for p in portas:
+            desc = (p.description or '').upper()
+            if 'CH340' in desc or 'CH341' in desc:
+                print(f"[LCD] ⚠️ Chip CH340/CH341 encontrado (provável tela): {p.device} ({p.description})")
+                return p.device
+        
+        # PRIORIDADE 3: VID 0x1a86 (fabricante do CH340) com qualquer PID
+        for p in portas:
+            if p.vid == 0x1a86:
+                print(f"[LCD] ⚠️ Dispositivo do fabricante CH340 encontrado: {p.device} ({p.description})")
+                return p.device
+        
+        # NÃO retorna porta aleatória — evita conectar em mouse/teclado/bluetooth
+        print("[LCD] ⚠️ Nenhuma tela Turing/CH340 reconhecida entre as portas disponíveis.")
+        return None
+    except Exception as e:
+        print(f"[LCD] Erro durante detecção de portas: {e}")
+        return None
 
 display_global = None
 
@@ -475,19 +508,19 @@ def run_worker_cycle():
     print("[Worker] Iniciando ciclo (buscando hardware e dados)...")
     
     porta = estado_app.get('porta_com', 'AUTO')
-    if porta.upper() == 'AUTO' or not porta.strip():
-        print("[LCD] Buscando porta USB automaticamente...")
+    
+    # Se a porta estiver como AUTO ou vazia, faz detecção inteligente
+    if not porta or porta.strip().upper() == 'AUTO':
+        print("[LCD] Modo automático — buscando tela Turing...")
         porta_descoberta = auto_descobrir_com()
         if porta_descoberta:
             porta = porta_descoberta
-            print(f"[LCD] Encontrado dispositivo na porta: {porta}")
             estado_app['porta_com'] = porta
             salvar_configuracao()
         else:
-            print("[LCD] Nenhum dispositivo serial/USB encontrado no PC.")
-            porta = "COM9"
+            porta = None  # Nenhuma tela encontrada — continua apenas web
 
-    # Se a porta mudou, ou se não tinhamos conexão, precisamos reconectar.
+    # Se a porta mudou ou se não temos conexão, reconecta
     if display_global is not None and getattr(display_global, 'com_port', None) != porta:
         print(f"[LCD] Porta alterada ou reconexão solicitada. Fechando a anterior...")
         try:
@@ -495,8 +528,9 @@ def run_worker_cycle():
         except: pass
         display_global = None
 
-    if display_global is None:
+    if display_global is None and porta and LcdCommRevA is not None:
         try:
+            # NUNCA passa "AUTO" para LcdCommRevA (ele chamaria sys.exit internamente)
             display_global = LcdCommRevA(porta)
             display_global.Reset()
             display_global.InitializeComm()
@@ -504,8 +538,13 @@ def run_worker_cycle():
         except Exception as e:
             print(f"⚠️ Aviso LCD: Não foi possível conectar na {porta} ({e}). Mostrarei apenas a Web.")
             display_global = None
+    elif display_global is None:
+        if LcdCommRevA is None:
+            print("⚠️ Driver LcdCommRevA não disponível — rodando apenas no modo Web.")
+        elif not porta:
+            print("⚠️ Nenhuma tela detectada — rodando apenas no modo Web Preview.")
     else:
-        # Se for um restart simples mantendo a porta, apenas dá um Clear na tela fisicamente
+        # Se for um restart simples mantendo a porta, apenas limpa a tela
         try: display_global.Clear()
         except: pass
 

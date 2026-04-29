@@ -124,6 +124,13 @@
                                 <span class="slider"></span>
                             </label>
                         </div>
+                        <div class="bg-zinc-800/50 p-4 rounded-xl flex justify-between items-center border border-zinc-700/50 hover:border-zinc-500 transition-colors">
+                            <span>🏷️ Promos Steam</span>
+                            <label class="switch">
+                                <input type="checkbox" id="modulo_promocoes" name="modulo_promocoes">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
                     </div>
                 </div>
 
@@ -156,8 +163,8 @@
                     </div>
 
                     <div>
-                        <label class="block text-sm font-medium text-gray-400 mb-1">Porta COM</label>
-                        <input type="text" id="porta_com" name="porta_com" class="w-full bg-zinc-800 border border-zinc-700 text-white rounded px-3 py-2 outline-none focus:border-primary">
+                        <label class="block text-sm font-medium text-gray-400 mb-1">Porta COM <span class="text-xs text-zinc-500">(AUTO = detecção automática)</span></label>
+                        <input type="text" id="porta_com" name="porta_com" placeholder="AUTO" class="w-full bg-zinc-800 border border-zinc-700 text-white rounded px-3 py-2 outline-none focus:border-primary">
                     </div>
                 </div>
 
@@ -190,6 +197,7 @@
             document.getElementById('modulo_jogos').checked = data.modulo_jogos;
             document.getElementById('modulo_noticias').checked = data.modulo_noticias;
             document.getElementById('modulo_reddit').checked = data.modulo_reddit;
+            document.getElementById('modulo_promocoes').checked = data.modulo_promocoes !== undefined ? data.modulo_promocoes : true;
             
             document.getElementById('jogos_plataforma').value = data.jogos_plataforma;
             document.getElementById('tempo_slide').value = data.tempo_slide;
@@ -236,6 +244,7 @@
             modulo_jogos: document.getElementById('modulo_jogos').checked,
             modulo_noticias: document.getElementById('modulo_noticias').checked,
             modulo_reddit: document.getElementById('modulo_reddit').checked,
+            modulo_promocoes: document.getElementById('modulo_promocoes').checked,
             jogos_plataforma: document.getElementById('jogos_plataforma').value,
             tempo_slide: parseInt(document.getElementById('tempo_slide').value) || 12,
             porta_com: document.getElementById('porta_com').value,
