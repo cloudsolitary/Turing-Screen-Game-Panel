@@ -23,10 +23,10 @@ sys.path.append(diretorio_atual)
 
 try:
     from library.lcd.lcd_comm_rev_a import LcdCommRevA
-except ImportError:
-    print("❌ Erro: Biblioteca 'library' não encontrada.")
-    # No modo build, isso pode não ser fatal para a compilação, mas na execução sim
-    pass
+except Exception as e:
+    print(f"❌ Erro Crítico do LcdCommRevA: {e}")
+    # Define como None para não lançar NameError e o painel Web continuar online
+    LcdCommRevA = None
 
 # ==========================================
 # VARIÁVEIS GLOBAIS E ESTADO
