@@ -157,24 +157,18 @@
                         </select>
                     </div>
 
-                    <div>
-                        <label class="block text-sm font-medium text-gray-400 mb-1">Gênero das Promoções Steam</label>
-                        <select id="promo_genero" name="promo_genero" class="w-full bg-zinc-800 border border-zinc-700 text-white rounded px-3 py-2 outline-none focus:border-primary">
-                            <option value="todos">Todos os Gêneros</option>
-                            <option value="action">🔫 Ação</option>
-                            <option value="adventure">🗺️ Aventura</option>
-                            <option value="rpg">⚔️ RPG</option>
-                            <option value="strategy">🧠 Estratégia</option>
-                            <option value="simulation">🎛️ Simulação</option>
-                            <option value="sports">⚽ Esportes</option>
-                            <option value="racing">🏎️ Corrida</option>
-                            <option value="indie">🎨 Indie</option>
-                            <option value="metroidvania">🧬 Metroidvania</option>
-                            <option value="plataforma">🏃 Plataforma</option>
-                            <option value="puzzle">🧩 Puzzle / Casual</option>
-                            <option value="horror">👻 Horror</option>
-                        </select>
+                <!-- Filtros de Marcadores Steam -->
+                <div>
+                    <h3 class="text-lg text-primary mb-3 font-medium">Marcadores da Steam (Filtros de Promoção)</h3>
+                    <p class="text-xs text-zinc-500 mb-2">Digite marcadores oficiais (ex: Metroidvania, RPG, Co-op). Se vazio ou "todos", mostra qualquer oferta.</p>
+                    <div class="flex space-x-2 mb-3">
+                        <input type="text" id="newPromoTag" placeholder="Ex: Metroidvania" class="flex-1 bg-zinc-800 border border-zinc-700 text-white rounded px-4 py-2 focus:outline-none focus:border-primary">
+                        <button type="button" onclick="addPromoTag()" class="bg-primary hover:bg-violet-600 text-white px-4 py-2 rounded transition-colors font-medium">Adicionar</button>
                     </div>
+                    <div id="promoTagsContainer" class="flex flex-wrap gap-2">
+                        <!-- Tags chips will be appended here -->
+                    </div>
+                </div>
 
                     <div>
                         <label class="block text-sm font-medium text-gray-400 mb-1">Tempo por Slide (segundos)</label>
@@ -216,6 +210,7 @@
 
 <script>
     let currentSubreddits = [];
+    let currentPromoTags = [];
 
     // Busca configurações atuais do servidor
     async function loadConfig() {
@@ -229,13 +224,14 @@
             document.getElementById('modulo_promocoes').checked = data.modulo_promocoes !== undefined ? data.modulo_promocoes : true;
             
             document.getElementById('jogos_plataforma').value = data.jogos_plataforma;
-            document.getElementById('promo_genero').value = data.promo_genero || 'todos';
             document.getElementById('tempo_slide').value = data.tempo_slide;
             document.getElementById('porta_com').value = data.porta_com;
             document.getElementById('rotacao').value = data.rotacao !== undefined ? String(data.rotacao) : '-90';
 
             currentSubreddits = data.lista_subreddits || [];
+            currentPromoTags = data.promo_generos || ['todos'];
             renderSubreddits();
+            renderPromoTags();
         } catch (e) {
             console.error("Erro ao carregar configurações", e);
         }
@@ -270,6 +266,42 @@
         renderSubreddits();
     }
 
+    function renderPromoTags() {
+        const container = document.getElementById('promoTagsContainer');
+        container.innerHTML = '';
+        currentPromoTags.forEach((tag, index) => {
+            const el = document.createElement('div');
+            el.className = "bg-zinc-800 border border-zinc-600 py-1 px-3 rounded-full flex items-center text-sm";
+            el.innerHTML = `
+                <span class="text-gray-300 mr-2">${tag}</span>
+                <button type="button" onclick="removePromoTag(${index})" class="text-red-400 hover:text-red-300 font-bold focus:outline-none">&times;</button>
+            `;
+            container.appendChild(el);
+        });
+    }
+
+    function addPromoTag() {
+        const input = document.getElementById('newPromoTag');
+        const val = input.value.trim();
+        if (val) {
+            // Remove 'todos' se estiver adicionando uma tag específica
+            if (currentPromoTags.length === 1 && currentPromoTags[0] === 'todos') {
+                currentPromoTags = [];
+            }
+            if (!currentPromoTags.includes(val)) {
+                currentPromoTags.push(val);
+                renderPromoTags();
+                input.value = '';
+            }
+        }
+    }
+
+    function removePromoTag(index) {
+        currentPromoTags.splice(index, 1);
+        if (currentPromoTags.length === 0) currentPromoTags = ['todos'];
+        renderPromoTags();
+    }
+
     async function salvarConfiguracoes() {
         const config = {
             modulo_jogos: document.getElementById('modulo_jogos').checked,
@@ -277,7 +309,7 @@
             modulo_reddit: document.getElementById('modulo_reddit').checked,
             modulo_promocoes: document.getElementById('modulo_promocoes').checked,
             jogos_plataforma: document.getElementById('jogos_plataforma').value,
-            promo_genero: document.getElementById('promo_genero').value,
+            promo_generos: currentPromoTags,
             tempo_slide: parseInt(document.getElementById('tempo_slide').value) || 12,
             porta_com: document.getElementById('porta_com').value,
             lista_subreddits: currentSubreddits,

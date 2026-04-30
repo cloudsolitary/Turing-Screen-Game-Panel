@@ -40,7 +40,7 @@ estado_app = {
     "modulo_noticias": True,
     "modulo_reddit": True,
     "modulo_promocoes": True,
-    "promo_genero": "todos",
+    "promo_generos": ["todos"],
     "lista_subreddits": ['emulation', 'PiratedGames', 'gadgets', 'SBCGaming'],
     "tempo_slide": 12,
     "porta_com": "AUTO",
@@ -145,22 +145,12 @@ def obter_generos_steam(appid):
     _cache_generos[appid] = []
     return []
 
-# Mapa de gêneros para termos de busca na Steam API
-GENEROS_MAP = {
-    'action': 'Action',
-    'adventure': 'Adventure',
-    'rpg': 'RPG',
-    'strategy': 'Strategy',
-    'simulation': 'Simulation',
-    'sports': 'Sports',
-    'racing': 'Racing',
-    'puzzle': 'Casual',
-    'shooter': 'Action',
-    'indie': 'Indie',
-    'horror': 'Horror',
-    'metroidvania': 'Metroidvania',
-    'plataforma': 'Platformer'
-}
+# Gêneros e Categorias comuns da Steam para auxílio no UI (opcional)
+GENEROS_STEAM_POPULARES = [
+    "Action", "Adventure", "RPG", "Strategy", "Simulation", "Sports", "Racing", 
+    "Indie", "Casual", "Massively Multiplayer", "Single-player", "Multi-player", "Co-op",
+    "Metroidvania", "Platformer", "Action-Adventure", "Horror", "Survival"
+]
 
 def buscar_promocoes_steam():
     if not estado_app.get('modulo_promocoes', True): return []
@@ -168,22 +158,24 @@ def buscar_promocoes_steam():
     # storeID=1 (Steam), onSale=1, metacritic=80+
     url = "https://www.cheapshark.com/api/1.0/deals?storeID=1&onSale=1&metacritic=80&steamRating=80&pageSize=60"
     
-    genero_filtro = estado_app.get('promo_genero', 'todos').lower()
-    genero_alvo = GENEROS_MAP.get(genero_filtro, None)
+    filtros = [f.lower() for f in estado_app.get('promo_generos', ['todos'])]
+    selecionou_todos = 'todos' in filtros or not filtros
     
     try:
         res = requests.get(url, headers=HEADERS_NAVEGADOR, timeout=10).json()
         candidatos = []
         
         # Se tem filtro de gênero, precisa consultar cada AppID
-        if genero_alvo and genero_filtro != 'todos':
+        if not selecionou_todos:
             random.shuffle(res)
             for p in res:
                 if len(candidatos) >= 5:
                     break
                 appid = p.get('steamAppID', '')
-                generos = obter_generos_steam(appid)
-                if genero_alvo in generos:
+                tags_jogo = [t.lower() for t in obter_generos_steam(appid)]
+                
+                # Verifica se existe intersecção entre filtros e tags do jogo
+                if any(f in tags_jogo for f in filtros):
                     candidatos.append(p)
         else:
             # Sem filtro: embaralha e pega 5
