@@ -185,36 +185,46 @@ def buscar_promocoes_steam():
         selecionados = itens[:total_puxar]
         
         promos = []
-        for p in selecionados:
+        if selecionados:
+            ids_str = ",".join([str(p.get('id')) for p in selecionados])
+            detalhes_batch = {}
             try:
-                appid = p.get('id')
-                p_info = p.get('price', {})
-                
-                # Preços em centavos no JSON da Steam
-                initial = p_info.get('initial_price', 0) / 100
-                final = p_info.get('final_price', 0) / 100
-                desconto = p_info.get('discount_percent', 0)
-                
-                # Tenta pegar Score do Metacritic para esse item via appdetails (somente para os 10 selecionados)
-                score = "N/A"
-                try:
-                    url_detalhes = f"https://store.steampowered.com/api/appdetails?appids={appid}&filters=metacritic"
-                    r_det = requests.get(url_detalhes, timeout=5).json()
-                    score = r_det.get(str(appid), {}).get('data', {}).get('metacritic', {}).get('score', "N/A")
-                except: pass
-                
-                img_url = f"https://cdn.akamai.steamstatic.com/steam/apps/{appid}/header.jpg"
+                # Busca detalhes em LOTE (Batch) para ser mais rápido e evitar bloqueio
+                url_batch = f"https://store.steampowered.com/api/appdetails?appids={ids_str}&filters=price_overview,metacritic&cc=BR&l=brazilian"
+                detalhes_batch = requests.get(url_batch, timeout=8).json()
+            except: pass
 
-                promos.append({
-                    'tipo': 'STEAM_PROMO', 
-                    'titulo': p.get('name', ''), 
-                    'img': img_url,
-                    'preco_normal': f"R$ {initial:.2f}".replace('.', ','),
-                    'preco': f"R$ {final:.2f}".replace('.', ','),
-                    'desconto': f"-{desconto}%",
-                    'score': score
-                })
-            except: continue
+            for p in selecionados:
+                try:
+                    appid = str(p.get('id'))
+                    info_extra = detalhes_batch.get(appid, {}).get('data', {}) if detalhes_batch else {}
+                    
+                    # Preços via Batch API (mais confiável) ou Fallback
+                    price_data = info_extra.get('price_overview', {})
+                    if price_data:
+                        initial = price_data.get('initial', 0) / 100
+                        final = price_data.get('final', 0) / 100
+                        desconto = price_data.get('discount_percent', 0)
+                    else:
+                        # Fallback se o batch falhar
+                        p_price = p.get('price') or {}
+                        initial = p_price.get('initial_price', 0) / 100
+                        final = p_price.get('final_price', 0) / 100
+                        desconto = p_price.get('discount_percent', 0)
+                    
+                    score = info_extra.get('metacritic', {}).get('score', "N/A")
+                    img_url = f"https://cdn.akamai.steamstatic.com/steam/apps/{appid}/header.jpg"
+
+                    promos.append({
+                        'tipo': 'STEAM_PROMO', 
+                        'titulo': p.get('name', ''), 
+                        'img': img_url,
+                        'preco_normal': f"R$ {initial:.2f}".replace('.', ','),
+                        'preco': f"R$ {final:.2f}".replace('.', ','),
+                        'desconto': f"-{desconto}%",
+                        'score': score
+                    })
+                except: continue
             
         return promos
     except Exception as e:
