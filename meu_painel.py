@@ -164,64 +164,61 @@ GENEROS_STEAM_POPULARES = [
 def buscar_promocoes_steam():
     if not estado_app.get('modulo_promocoes', True): return []
     
-    # storeID=1 (Steam), onSale=1, metacritic=65+, steamRating=70+, pool de 150 jogos
-    url = "https://www.cheapshark.com/api/1.0/deals?storeID=1&onSale=1&metacritic=65&steamRating=70&pageSize=150"
-    
     filtros = [f.lower() for f in estado_app.get('promo_generos', ['todos'])]
     selecionou_todos = 'todos' in filtros or not filtros
     
+    # Termo de busca baseado nos marcadores
+    termo = "" if selecionou_todos else " ".join(filtros)
+    
+    # API Oficial Steam Store Search (cc=BR para preços em Reais)
+    url = f"https://store.steampowered.com/api/storesearch/?term={termo}&specials=1&cc=BR&l=brazilian"
+    
     try:
         res = requests.get(url, headers=HEADERS_NAVEGADOR, timeout=10).json()
-        candidatos = []
+        itens = res.get('items', [])
         
-        # Se tem filtro de gênero, precisa consultar cada AppID
-        if not selecionou_todos:
-            random.shuffle(res)
-            for p in res:
-                if len(candidatos) >= 10:
-                    break
-                appid = p.get('steamAppID', '')
-                tags_jogo = [t.lower() for t in obter_generos_steam(appid)]
-                
-                # Verifica se existe intersecção entre filtros e tags do jogo
-                if any(f in tags_jogo for f in filtros):
-                    candidatos.append(p)
-        else:
-            # Sem filtro: embaralha e pega 10
-            if len(res) > 10:
-                candidatos = random.sample(res, 10)
-            else:
-                candidatos = res
+        if not itens: return []
+        
+        # Seleciona 10 aleatórios do resultado oficial
+        total_puxar = 10
+        random.shuffle(itens)
+        selecionados = itens[:total_puxar]
         
         promos = []
-        for p in candidatos:
+        for p in selecionados:
             try:
-                titulo = p.get('title', '')
-                preco_normal = p.get('normalPrice', '0')
-                preco_venda = p.get('salePrice', '0')
-                savings = p.get('savings', '0')
-                desconto = float(savings) if savings else 0
-                appid = p.get('steamAppID', '')
+                appid = p.get('id')
+                p_info = p.get('price', {})
                 
-                img_url = p.get('thumb', '')
-                if appid:
-                    img_url = f"https://cdn.akamai.steamstatic.com/steam/apps/{appid}/header.jpg"
+                # Preços em centavos no JSON da Steam
+                initial = p_info.get('initial_price', 0) / 100
+                final = p_info.get('final_price', 0) / 100
+                desconto = p_info.get('discount_percent', 0)
+                
+                # Tenta pegar Score do Metacritic para esse item via appdetails (somente para os 10 selecionados)
+                score = "N/A"
+                try:
+                    url_detalhes = f"https://store.steampowered.com/api/appdetails?appids={appid}&filters=metacritic"
+                    r_det = requests.get(url_detalhes, timeout=5).json()
+                    score = r_det.get(str(appid), {}).get('data', {}).get('metacritic', {}).get('score', "N/A")
+                except: pass
+                
+                img_url = f"https://cdn.akamai.steamstatic.com/steam/apps/{appid}/header.jpg"
 
                 promos.append({
                     'tipo': 'STEAM_PROMO', 
-                    'titulo': titulo, 
+                    'titulo': p.get('name', ''), 
                     'img': img_url,
-                    'preco_normal': preco_normal,
-                    'preco': preco_venda,
-                    'desconto': f"-{int(desconto)}%",
-                    'score': p.get('metacriticScore', '80')
+                    'preco_normal': f"R$ {initial:.2f}".replace('.', ','),
+                    'preco': f"R$ {final:.2f}".replace('.', ','),
+                    'desconto': f"-{desconto}%",
+                    'score': score
                 })
-            except Exception as e:
-                print(f"Erro ao processar item de promoção: {e}")
+            except: continue
             
         return promos
     except Exception as e:
-        print(f"Erro ao buscar promoções Steam: {e}")
+        print(f"Erro ao buscar promoções na API oficial Steam: {e}")
         return []
 
 def buscar_gamevicio():
