@@ -122,28 +122,37 @@ import random
 _cache_generos = {}
 
 def obter_generos_steam(appid):
-    """Consulta a Steam Storefront API para obter os gêneros e categorias de um jogo."""
+    """Consulta a Steam Storefront API e o SteamSpy para obter uma lista completa de tags/gêneros."""
     if not appid:
         return []
     if appid in _cache_generos:
         return _cache_generos[appid]
+    
+    tags_encontradas = set()
+    
+    # 1. Tenta Steam Storefront API (Gêneros e Categorias)
     try:
-        url = f"https://store.steampowered.com/api/appdetails?appids={appid}"
-        r = requests.get(url, timeout=8).json()
+        url_steam = f"https://store.steampowered.com/api/appdetails?appids={appid}"
+        r = requests.get(url_steam, timeout=5).json()
         dados = r.get(str(appid), {})
         if dados.get('success') and 'data' in dados:
-            # Pega Gêneros
-            generos = [g['description'] for g in dados['data'].get('genres', [])]
-            # Pega Categorias
-            categorias = [c['description'] for c in dados['data'].get('categories', [])]
-            
-            total_tags = generos + categorias
-            _cache_generos[appid] = total_tags
-            return total_tags
-    except:
-        pass
-    _cache_generos[appid] = []
-    return []
+            gen = [g['description'] for g in dados['data'].get('genres', [])]
+            cat = [c['description'] for c in dados['data'].get('categories', [])]
+            for t in gen + cat: tags_encontradas.add(t)
+    except: pass
+    
+    # 2. Tenta SteamSpy para "User Tags" (onde fica Metroidvania, Roguelike, etc.)
+    try:
+        url_spy = f"https://steamspy.com/api.php?request=appdetails&appid={appid}"
+        r_spy = requests.get(url_spy, timeout=5).json()
+        tags_spy = r_spy.get('tags', {})
+        if isinstance(tags_spy, dict):
+            for t in tags_spy.keys(): tags_encontradas.add(t)
+    except: pass
+
+    final_tags = list(tags_encontradas)
+    _cache_generos[appid] = final_tags
+    return final_tags
 
 # Gêneros e Categorias comuns da Steam para auxílio no UI (opcional)
 GENEROS_STEAM_POPULARES = [
@@ -186,28 +195,34 @@ def buscar_promocoes_steam():
         
         promos = []
         for p in candidatos:
-            titulo = p.get('title', '')
-            preco_normal = p.get('normalPrice', '0')
-            preco_venda = p.get('salePrice', '0')
-            desconto = float(p.get('savings', '0'))
-            appid = p.get('steamAppID', '')
-            
-            img_url = p.get('thumb', '')
-            if appid:
-                img_url = f"https://cdn.akamai.steamstatic.com/steam/apps/{appid}/header.jpg"
+            try:
+                titulo = p.get('title', '')
+                preco_normal = p.get('normalPrice', '0')
+                preco_venda = p.get('salePrice', '0')
+                savings = p.get('savings', '0')
+                desconto = float(savings) if savings else 0
+                appid = p.get('steamAppID', '')
+                
+                img_url = p.get('thumb', '')
+                if appid:
+                    img_url = f"https://cdn.akamai.steamstatic.com/steam/apps/{appid}/header.jpg"
 
-            promos.append({
-                'tipo': 'STEAM_PROMO', 
-                'titulo': titulo, 
-                'img': img_url,
-                'preco_normal': preco_normal,
-                'preco': preco_venda,
-                'desconto': f"-{int(desconto)}%",
-                'score': p.get('metacriticScore', '80')
-            })
+                promos.append({
+                    'tipo': 'STEAM_PROMO', 
+                    'titulo': titulo, 
+                    'img': img_url,
+                    'preco_normal': preco_normal,
+                    'preco': preco_venda,
+                    'desconto': f"-{int(desconto)}%",
+                    'score': p.get('metacriticScore', '80')
+                })
+            except Exception as e:
+                print(f"Erro ao processar item de promoção: {e}")
             
         return promos
-    except: return []
+    except Exception as e:
+        print(f"Erro ao buscar promoções Steam: {e}")
+        return []
 
 def buscar_gamevicio():
     if not estado_app['modulo_noticias']: return []

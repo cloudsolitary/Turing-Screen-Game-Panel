@@ -165,8 +165,17 @@
                         <input type="text" id="newPromoTag" placeholder="Ex: Metroidvania" class="flex-1 bg-zinc-800 border border-zinc-700 text-white rounded px-4 py-2 focus:outline-none focus:border-primary">
                         <button type="button" onclick="addPromoTag()" class="bg-primary hover:bg-violet-600 text-white px-4 py-2 rounded transition-colors font-medium">Adicionar</button>
                     </div>
-                    <div id="promoTagsContainer" class="flex flex-wrap gap-2">
+                    <div id="promoTagsContainer" class="flex flex-wrap gap-2 mb-3">
                         <!-- Tags chips will be appended here -->
+                    </div>
+                    <div class="flex flex-wrap gap-1 mt-2">
+                        <span class="text-xs text-zinc-600 mr-2 self-center">Sugestões:</span>
+                        <button type="button" onclick="quickAddTag('Metroidvania')" class="text-[10px] bg-zinc-800 hover:bg-zinc-700 text-zinc-400 px-2 py-0.5 rounded border border-zinc-700 transition-colors">Metroidvania</button>
+                        <button type="button" onclick="quickAddTag('Soulslike')" class="text-[10px] bg-zinc-800 hover:bg-zinc-700 text-zinc-400 px-2 py-0.5 rounded border border-zinc-700 transition-colors">Soulslike</button>
+                        <button type="button" onclick="quickAddTag('RPG')" class="text-[10px] bg-zinc-800 hover:bg-zinc-700 text-zinc-400 px-2 py-0.5 rounded border border-zinc-700 transition-colors">RPG</button>
+                        <button type="button" onclick="quickAddTag('Platformer')" class="text-[10px] bg-zinc-800 hover:bg-zinc-700 text-zinc-400 px-2 py-0.5 rounded border border-zinc-700 transition-colors">Plataforma</button>
+                        <button type="button" onclick="quickAddTag('Open World')" class="text-[10px] bg-zinc-800 hover:bg-zinc-700 text-zinc-400 px-2 py-0.5 rounded border border-zinc-700 transition-colors">Mundo Aberto</button>
+                        <button type="button" onclick="quickAddTag('Action')" class="text-[10px] bg-zinc-800 hover:bg-zinc-700 text-zinc-400 px-2 py-0.5 rounded border border-zinc-700 transition-colors">Ação</button>
                     </div>
                 </div>
 
@@ -293,6 +302,16 @@
                 renderPromoTags();
                 input.value = '';
             }
+        }
+    }
+
+    function quickAddTag(tag) {
+        if (currentPromoTags.length === 1 && currentPromoTags[0] === 'todos') {
+            currentPromoTags = [];
+        }
+        if (!currentPromoTags.includes(tag)) {
+            currentPromoTags.push(tag);
+            renderPromoTags();
         }
     }
 
