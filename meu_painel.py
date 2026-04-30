@@ -122,7 +122,7 @@ import random
 _cache_generos = {}
 
 def obter_generos_steam(appid):
-    """Consulta a Steam Storefront API para obter os gêneros de um jogo."""
+    """Consulta a Steam Storefront API para obter os gêneros e categorias de um jogo."""
     if not appid:
         return []
     if appid in _cache_generos:
@@ -132,9 +132,14 @@ def obter_generos_steam(appid):
         r = requests.get(url, timeout=8).json()
         dados = r.get(str(appid), {})
         if dados.get('success') and 'data' in dados:
+            # Pega Gêneros
             generos = [g['description'] for g in dados['data'].get('genres', [])]
-            _cache_generos[appid] = generos
-            return generos
+            # Pega Categorias
+            categorias = [c['description'] for c in dados['data'].get('categories', [])]
+            
+            total_tags = generos + categorias
+            _cache_generos[appid] = total_tags
+            return total_tags
     except:
         pass
     _cache_generos[appid] = []
@@ -153,6 +158,8 @@ GENEROS_MAP = {
     'shooter': 'Action',
     'indie': 'Indie',
     'horror': 'Horror',
+    'metroidvania': 'Metroidvania',
+    'plataforma': 'Platformer'
 }
 
 def buscar_promocoes_steam():
@@ -370,9 +377,22 @@ def criar_layout(item):
     # LAYOUT 1.5: PROMOÇÕES STEAM
     elif item['tipo'] == 'STEAM_PROMO':
         try:
+            from PIL import ImageFilter
             res = requests.get(item['img'], timeout=10)
             capa = Image.open(BytesIO(res.content)).convert("RGB")
-            fundo = ImageOps.fit(capa, (480, 320), Image.Resampling.LANCZOS).convert('RGBA')
+            
+            # Melhora Proporcionalidade: Fundo desfocado + arte centralizada proporcional
+            # 1. Cria o fundo desfocado (preenche tudo)
+            fundo_base = ImageOps.fit(capa, (480, 320), bleed=0.1)
+            fundo = fundo_base.filter(ImageFilter.GaussianBlur(radius=15))
+            
+            # 2. Cria a camada da arte centralizada proporcionalmente (sem cortar)
+            arte_proporcional = ImageOps.contain(capa, (440, 240)) # Deixa espaço para textos
+            pos_x = (480 - arte_proporcional.width) // 2
+            pos_y = 50 # Um pouco abaixo do topo
+            
+            fundo.paste(arte_proporcional, (pos_x, pos_y))
+            fundo = fundo.convert('RGBA')
         except: fundo = Image.new('RGBA', (480, 320), color='#1e1e2e')
 
         camada = Image.new('RGBA', (480, 320), (0, 0, 0, 0))
