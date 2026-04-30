@@ -553,6 +553,17 @@ def auto_descobrir_com():
 
 display_global = None
 
+def validar_porta_com(porta):
+    """Testa se a porta COM existe e pode ser aberta. Retorna True/False."""
+    if not porta:
+        return False
+    try:
+        teste = serial.Serial(porta, 115200, timeout=1)
+        teste.close()
+        return True
+    except Exception:
+        return False
+
 def run_worker_cycle():
     global force_restart, display_global
     print("[Worker] Iniciando ciclo (buscando hardware e dados)...")
@@ -568,12 +579,17 @@ def run_worker_cycle():
             estado_app['porta_com'] = porta
             salvar_configuracao()
         else:
-            # Porta não detectada — verifica se o main() já pediu ao usuário
             porta_manual = estado_app.get('_porta_manual', None)
             if porta_manual:
                 porta = porta_manual
             else:
-                porta = None  # Nenhuma tela — continua apenas web
+                porta = None
+
+    # Pré-validação: testa se a porta realmente existe antes de passar ao driver
+    # (o driver chama os._exit() se falhar, matando o processo inteiro)
+    if porta and not validar_porta_com(porta):
+        print(f"⚠️ Porta {porta} não está disponível. Rodando apenas no modo Web.")
+        porta = None
 
     # Se a porta mudou ou se não temos conexão, reconecta
     if display_global is not None and getattr(display_global, 'com_port', None) != porta:
@@ -585,14 +601,12 @@ def run_worker_cycle():
 
     if display_global is None and porta and LcdCommRevA is not None:
         try:
-            # NUNCA passa "AUTO" para LcdCommRevA (ele chamaria sys.exit internamente)
             display_global = LcdCommRevA(porta)
             display_global.Reset()
             display_global.InitializeComm()
             print(f"✅ Conectado na porta {porta}!")
         except SystemExit:
-            # LcdComm.openSerial() chama sys.exit() se falhar — interceptamos para não matar o app
-            print(f"⚠️ Driver tentou encerrar o programa ao conectar na {porta}. Ignorando e rodando apenas Web.")
+            print(f"⚠️ Driver tentou encerrar o programa ao conectar na {porta}. Ignorando.")
             display_global = None
         except Exception as e:
             print(f"⚠️ Aviso LCD: Não foi possível conectar na {porta} ({e}). Mostrarei apenas a Web.")
@@ -601,9 +615,8 @@ def run_worker_cycle():
         if LcdCommRevA is None:
             print("⚠️ Driver LcdCommRevA não disponível — rodando apenas no modo Web.")
         elif not porta:
-            print("⚠️ Nenhuma tela detectada — rodando apenas no modo Web Preview.")
+            print("⚠️ Nenhuma tela disponível — rodando apenas no modo Web Preview.")
     else:
-        # Se for um restart simples mantendo a porta, apenas limpa a tela
         try: display_global.Clear()
         except: pass
 
@@ -708,9 +721,14 @@ def pedir_porta_com():
     """Pergunta a porta COM ao usuário no terminal se a detecção automática falhar."""
     porta_config = estado_app.get('porta_com', 'AUTO')
     
-    # Se já tem uma porta fixa configurada (não AUTO), usa direto
+    # Se já tem uma porta fixa configurada (não AUTO), verifica se ela ainda existe
     if porta_config and porta_config.strip().upper() != 'AUTO':
-        return
+        if validar_porta_com(porta_config):
+            print(f"[LCD] ✅ Porta salva {porta_config} validada com sucesso.")
+            return
+        else:
+            print(f"[LCD] ⚠️ Porta salva {porta_config} não existe mais. Refazendo detecção...")
+            estado_app['porta_com'] = 'AUTO'
     
     # Tenta auto-detectar primeiro
     porta_auto = auto_descobrir_com()
@@ -752,11 +770,11 @@ def pedir_porta_com():
         resposta = ""
     
     if resposta and resposta.upper() != 'SKIP':
-        # Salvar a porta escolhida tanto no config quanto no estado temporário
-        estado_app['porta_com'] = resposta.upper()
-        estado_app['_porta_manual'] = resposta.upper()
+        porta_final = resposta.upper()
+        estado_app['porta_com'] = porta_final
+        estado_app['_porta_manual'] = porta_final
         salvar_configuracao()
-        print(f"  ✅ Porta configurada: {resposta.upper()}")
+        print(f"  ✅ Porta configurada: {porta_final}")
     else:
         print("  ⏭️ Rodando sem tela — apenas Web Preview.")
         estado_app['_porta_manual'] = None
