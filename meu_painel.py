@@ -40,6 +40,7 @@ estado_app = {
     "modulo_noticias": True,
     "modulo_reddit": True,
     "modulo_promocoes": True,
+    "promo_genero": "todos",
     "lista_subreddits": ['emulation', 'PiratedGames', 'gadgets', 'SBCGaming'],
     "tempo_slide": 12,
     "porta_com": "AUTO",
@@ -117,32 +118,81 @@ def buscar_jogos_gratis():
 
 import random
 
+# Cache de gêneros por AppID da Steam (evita requests repetidos)
+_cache_generos = {}
+
+def obter_generos_steam(appid):
+    """Consulta a Steam Storefront API para obter os gêneros de um jogo."""
+    if not appid:
+        return []
+    if appid in _cache_generos:
+        return _cache_generos[appid]
+    try:
+        url = f"https://store.steampowered.com/api/appdetails?appids={appid}"
+        r = requests.get(url, timeout=8).json()
+        dados = r.get(str(appid), {})
+        if dados.get('success') and 'data' in dados:
+            generos = [g['description'] for g in dados['data'].get('genres', [])]
+            _cache_generos[appid] = generos
+            return generos
+    except:
+        pass
+    _cache_generos[appid] = []
+    return []
+
+# Mapa de gêneros para termos de busca na Steam API
+GENEROS_MAP = {
+    'action': 'Action',
+    'adventure': 'Adventure',
+    'rpg': 'RPG',
+    'strategy': 'Strategy',
+    'simulation': 'Simulation',
+    'sports': 'Sports',
+    'racing': 'Racing',
+    'puzzle': 'Casual',
+    'shooter': 'Action',
+    'indie': 'Indie',
+    'horror': 'Horror',
+}
+
 def buscar_promocoes_steam():
     if not estado_app.get('modulo_promocoes', True): return []
     
     # storeID=1 (Steam), onSale=1, metacritic=80+
-    url = "https://www.cheapshark.com/api/1.0/deals?storeID=1&onSale=1&metacritic=80&steamRating=80"
+    url = "https://www.cheapshark.com/api/1.0/deals?storeID=1&onSale=1&metacritic=80&steamRating=80&pageSize=60"
+    
+    genero_filtro = estado_app.get('promo_genero', 'todos').lower()
+    genero_alvo = GENEROS_MAP.get(genero_filtro, None)
     
     try:
         res = requests.get(url, headers=HEADERS_NAVEGADOR, timeout=10).json()
-        promos = []
+        candidatos = []
         
-        # Embaralha os resultados para mostrar jogos diferentes a cada ciclo
-        if len(res) > 5:
-            res_filtrado = random.sample(res, 5)
+        # Se tem filtro de gênero, precisa consultar cada AppID
+        if genero_alvo and genero_filtro != 'todos':
+            random.shuffle(res)
+            for p in res:
+                if len(candidatos) >= 5:
+                    break
+                appid = p.get('steamAppID', '')
+                generos = obter_generos_steam(appid)
+                if genero_alvo in generos:
+                    candidatos.append(p)
         else:
-            res_filtrado = res
-            
-        for p in res_filtrado:
+            # Sem filtro: embaralha e pega 5
+            if len(res) > 5:
+                candidatos = random.sample(res, 5)
+            else:
+                candidatos = res
+        
+        promos = []
+        for p in candidatos:
             titulo = p.get('title', '')
             preco_normal = p.get('normalPrice', '0')
             preco_venda = p.get('salePrice', '0')
             desconto = float(p.get('savings', '0'))
-            steam_count = p.get('steamRatingCount', '0')
-            steam_perc = p.get('steamRatingPercent', '0')
             appid = p.get('steamAppID', '')
             
-            # Usar imagem de alta qualidade da Steam
             img_url = p.get('thumb', '')
             if appid:
                 img_url = f"https://cdn.akamai.steamstatic.com/steam/apps/{appid}/header.jpg"

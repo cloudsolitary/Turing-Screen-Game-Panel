@@ -147,13 +147,30 @@
                 </div>
 
                 <!-- Config Extras -->
-                <div class="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
                     <div>
-                        <label class="block text-sm font-medium text-gray-400 mb-1">Plataforma de Jogos</label>
+                        <label class="block text-sm font-medium text-gray-400 mb-1">Plataforma de Jogos Grátis</label>
                         <select id="jogos_plataforma" name="jogos_plataforma" class="w-full bg-zinc-800 border border-zinc-700 text-white rounded px-3 py-2 outline-none focus:border-primary">
                             <option value="todas">Todas (Steam + Epic)</option>
                             <option value="Steam">Apenas Steam</option>
                             <option value="Epic">Apenas Epic Games</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-400 mb-1">Gênero das Promoções Steam</label>
+                        <select id="promo_genero" name="promo_genero" class="w-full bg-zinc-800 border border-zinc-700 text-white rounded px-3 py-2 outline-none focus:border-primary">
+                            <option value="todos">Todos os Gêneros</option>
+                            <option value="action">🔫 Ação</option>
+                            <option value="adventure">🗺️ Aventura</option>
+                            <option value="rpg">⚔️ RPG</option>
+                            <option value="strategy">🧠 Estratégia</option>
+                            <option value="simulation">🎛️ Simulação</option>
+                            <option value="sports">⚽ Esportes</option>
+                            <option value="racing">🏎️ Corrida</option>
+                            <option value="indie">🎨 Indie</option>
+                            <option value="puzzle">🧩 Puzzle / Casual</option>
+                            <option value="horror">👻 Horror</option>
                         </select>
                     </div>
 
@@ -165,6 +182,16 @@
                     <div>
                         <label class="block text-sm font-medium text-gray-400 mb-1">Porta COM <span class="text-xs text-zinc-500">(AUTO = detecção automática)</span></label>
                         <input type="text" id="porta_com" name="porta_com" placeholder="AUTO" class="w-full bg-zinc-800 border border-zinc-700 text-white rounded px-3 py-2 outline-none focus:border-primary">
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-400 mb-1">Rotação da Tela</label>
+                        <select id="rotacao" name="rotacao" class="w-full bg-zinc-800 border border-zinc-700 text-white rounded px-3 py-2 outline-none focus:border-primary">
+                            <option value="-90">Normal (-90°)</option>
+                            <option value="90">Invertida (+90°)</option>
+                            <option value="0">Sem Rotação (0°)</option>
+                            <option value="180">De Cabeça para Baixo (180°)</option>
+                        </select>
                     </div>
                 </div>
 
@@ -200,8 +227,10 @@
             document.getElementById('modulo_promocoes').checked = data.modulo_promocoes !== undefined ? data.modulo_promocoes : true;
             
             document.getElementById('jogos_plataforma').value = data.jogos_plataforma;
+            document.getElementById('promo_genero').value = data.promo_genero || 'todos';
             document.getElementById('tempo_slide').value = data.tempo_slide;
             document.getElementById('porta_com').value = data.porta_com;
+            document.getElementById('rotacao').value = data.rotacao !== undefined ? String(data.rotacao) : '-90';
 
             currentSubreddits = data.lista_subreddits || [];
             renderSubreddits();
@@ -246,10 +275,11 @@
             modulo_reddit: document.getElementById('modulo_reddit').checked,
             modulo_promocoes: document.getElementById('modulo_promocoes').checked,
             jogos_plataforma: document.getElementById('jogos_plataforma').value,
+            promo_genero: document.getElementById('promo_genero').value,
             tempo_slide: parseInt(document.getElementById('tempo_slide').value) || 12,
             porta_com: document.getElementById('porta_com').value,
             lista_subreddits: currentSubreddits,
-            rotacao: -90
+            rotacao: parseInt(document.getElementById('rotacao').value) || -90
         };
 
         try {
