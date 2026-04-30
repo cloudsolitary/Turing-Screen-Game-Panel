@@ -568,7 +568,12 @@ def run_worker_cycle():
             estado_app['porta_com'] = porta
             salvar_configuracao()
         else:
-            porta = None  # Nenhuma tela encontrada — continua apenas web
+            # Porta não detectada — verifica se o main() já pediu ao usuário
+            porta_manual = estado_app.get('_porta_manual', None)
+            if porta_manual:
+                porta = porta_manual
+            else:
+                porta = None  # Nenhuma tela — continua apenas web
 
     # Se a porta mudou ou se não temos conexão, reconecta
     if display_global is not None and getattr(display_global, 'com_port', None) != porta:
@@ -585,6 +590,10 @@ def run_worker_cycle():
             display_global.Reset()
             display_global.InitializeComm()
             print(f"✅ Conectado na porta {porta}!")
+        except SystemExit:
+            # LcdComm.openSerial() chama sys.exit() se falhar — interceptamos para não matar o app
+            print(f"⚠️ Driver tentou encerrar o programa ao conectar na {porta}. Ignorando e rodando apenas Web.")
+            display_global = None
         except Exception as e:
             print(f"⚠️ Aviso LCD: Não foi possível conectar na {porta} ({e}). Mostrarei apenas a Web.")
             display_global = None
@@ -695,11 +704,70 @@ def restart():
     force_restart = True
     return jsonify({"status": "reiniciando"}), 200
 
-# ==========================================
-# INICIALIZAÇÃO
-# ==========================================
+def pedir_porta_com():
+    """Pergunta a porta COM ao usuário no terminal se a detecção automática falhar."""
+    porta_config = estado_app.get('porta_com', 'AUTO')
+    
+    # Se já tem uma porta fixa configurada (não AUTO), usa direto
+    if porta_config and porta_config.strip().upper() != 'AUTO':
+        return
+    
+    # Tenta auto-detectar primeiro
+    porta_auto = auto_descobrir_com()
+    if porta_auto:
+        print(f"[LCD] ✅ Tela detectada automaticamente: {porta_auto}")
+        estado_app['porta_com'] = porta_auto
+        salvar_configuracao()
+        return
+    
+    # Auto-detecção falhou — pede ao usuário
+    print("")
+    print("=======================================")
+    print("  ⚠️  TELA NÃO DETECTADA AUTOMATICAMENTE")
+    print("=======================================")
+    
+    try:
+        portas = list(serial.tools.list_ports.comports())
+        if portas:
+            print("")
+            print("  Portas disponíveis no sistema:")
+            for i, p in enumerate(portas):
+                print(f"    [{i+1}] {p.device} — {p.description}")
+            print("")
+        else:
+            print("")
+            print("  Nenhuma porta serial encontrada.")
+            print("  Verifique se a tela está conectada via USB.")
+            print("")
+    except:
+        pass
+    
+    print("  Digite a porta COM da sua tela (ex: COM3, COM5)")
+    print("  Ou tecle ENTER para rodar apenas o painel Web sem tela.")
+    print("")
+    
+    try:
+        resposta = input("  Porta COM > ").strip()
+    except (EOFError, KeyboardInterrupt):
+        resposta = ""
+    
+    if resposta and resposta.upper() != 'SKIP':
+        # Salvar a porta escolhida tanto no config quanto no estado temporário
+        estado_app['porta_com'] = resposta.upper()
+        estado_app['_porta_manual'] = resposta.upper()
+        salvar_configuracao()
+        print(f"  ✅ Porta configurada: {resposta.upper()}")
+    else:
+        print("  ⏭️ Rodando sem tela — apenas Web Preview.")
+        estado_app['_porta_manual'] = None
+    print("")
+
 def main():
     carregar_configuracao()
+    
+    # Pergunta a porta COM se necessário (antes de iniciar threads)
+    pedir_porta_com()
+    
     # Inicia a thread de LCD
     t = threading.Thread(target=worker_thread, daemon=True)
     t.start()
