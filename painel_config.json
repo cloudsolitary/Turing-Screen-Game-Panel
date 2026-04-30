@@ -1,8 +1,10 @@
 {
     "modulo_jogos": true,
-    "jogos_plataforma": "Steam",
+    "jogos_plataforma": "todas",
     "modulo_noticias": true,
     "modulo_reddit": true,
+    "modulo_promocoes": true,
+    "promo_genero": "todos",
     "lista_subreddits": [
         "emulation",
         "PiratedGames",
