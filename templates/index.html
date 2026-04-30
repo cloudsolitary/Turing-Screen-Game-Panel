@@ -131,6 +131,13 @@
                                 <span class="slider"></span>
                             </label>
                         </div>
+                        <div class="bg-zinc-800/50 p-4 rounded-xl flex justify-between items-center border border-zinc-700/50 hover:border-zinc-500 transition-colors">
+                            <span>🎲 Explorar Steam</span>
+                            <label class="switch">
+                                <input type="checkbox" id="modulo_steam_random" name="modulo_steam_random">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
                     </div>
                 </div>
 
@@ -231,6 +238,7 @@
             document.getElementById('modulo_noticias').checked = data.modulo_noticias;
             document.getElementById('modulo_reddit').checked = data.modulo_reddit;
             document.getElementById('modulo_promocoes').checked = data.modulo_promocoes !== undefined ? data.modulo_promocoes : true;
+            document.getElementById('modulo_steam_random').checked = data.modulo_steam_random !== undefined ? data.modulo_steam_random : true;
             
             document.getElementById('jogos_plataforma').value = data.jogos_plataforma;
             document.getElementById('tempo_slide').value = data.tempo_slide;
@@ -327,6 +335,7 @@
             modulo_noticias: document.getElementById('modulo_noticias').checked,
             modulo_reddit: document.getElementById('modulo_reddit').checked,
             modulo_promocoes: document.getElementById('modulo_promocoes').checked,
+            modulo_steam_random: document.getElementById('modulo_steam_random').checked,
             jogos_plataforma: document.getElementById('jogos_plataforma').value,
             promo_generos: currentPromoTags,
             tempo_slide: parseInt(document.getElementById('tempo_slide').value) || 12,

@@ -1,8 +1,5 @@
 import os
 import sys
-import sys
-sys.stdout.reconfigure(encoding='utf-8')
-
 import time
 import requests
 import feedparser
@@ -10,11 +7,14 @@ import textwrap
 import re
 import json
 import threading
+import random
 from io import BytesIO
-import base64
 from bs4 import BeautifulSoup
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 from flask import Flask, render_template, request, jsonify, send_file, Response
+
+# Força o encoding correto no terminal
+sys.stdout.reconfigure(encoding='utf-8')
 
 # --- CONFIGURAÇÃO DE CAMINHO ---
 app = Flask(__name__)
@@ -25,7 +25,6 @@ try:
     from library.lcd.lcd_comm_rev_a import LcdCommRevA
 except Exception as e:
     print(f"❌ Erro Crítico do LcdCommRevA: {e}")
-    # Define como None para não lançar NameError e o painel Web continuar online
     LcdCommRevA = None
 
 # ==========================================
@@ -33,13 +32,13 @@ except Exception as e:
 # ==========================================
 ARQUIVO_CONFIG = os.path.join(diretorio_atual, 'painel_config.json')
 
-# Estado padrao que será sobrescrito ao ler o JSON
 estado_app = {
     "modulo_jogos": True,
     "jogos_plataforma": "todas",
     "modulo_noticias": True,
     "modulo_reddit": True,
     "modulo_promocoes": True,
+    "modulo_steam_random": True,  # ⚡ NOVO MÓDULO: Jogo Aleatório Steam
     "promo_generos": ["todos"],
     "lista_subreddits": ['emulation', 'PiratedGames', 'gadgets', 'SBCGaming'],
     "tempo_slide": 12,
@@ -47,13 +46,15 @@ estado_app = {
     "rotacao": -90
 }
 
-# Variável para armazenar o preview
 preview_lock = threading.Lock()
 preview_bytes = None
 
 HEADERS_NAVEGADOR = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 }
+
+# Cache global para não baixar 150 mil IDs toda hora
+CACHE_STEAM_APPIDS = []
 
 # ==========================================
 # FUNÇÕES DE CONFIGURAÇÃO
@@ -75,14 +76,81 @@ def salvar_configuracao():
 # ==========================================
 # BUSCADORES DE DADOS
 # ==========================================
+def carregar_lista_steam():
+    """Baixa e faz cache de todos os AppIDs da Steam usando múltiplos métodos de fallback."""
+    global CACHE_STEAM_APPIDS
+    if CACHE_STEAM_APPIDS: 
+        return CACHE_STEAM_APPIDS
+    
+    # Métodos 1 e 2: API Principal de AppList
+    for url in ["https://api.steampowered.com/ISteamApps/GetAppList/v2/",
+                 "https://api.steampowered.com/ISteamApps/GetAppList/v0002/"]:
+        try:
+            res = requests.get(url, timeout=15).json()
+            apps = res.get('applist', {}).get('apps', [])
+            ids = [a['appid'] for a in apps if a.get('name')]
+            if ids:
+                CACHE_STEAM_APPIDS = ids
+                return ids
+        except: continue
+        
+    # Método 3: Featured (puxa IDs de jogos populares/novos)
+    try:
+        res = requests.get("https://store.steampowered.com/api/featuredcategories/", timeout=15).json()
+        ids_extra = set()
+        for cat in ("specials", "top_sellers", "new_releases"):
+            for g in res.get(cat, {}).get("items", []): ids_extra.add(g.get("id", 0))
+        if ids_extra:
+            CACHE_STEAM_APPIDS = list(ids_extra)
+            return CACHE_STEAM_APPIDS
+    except: pass
+    
+    # Fallback manual se tudo falhar
+    if not CACHE_STEAM_APPIDS:
+        CACHE_STEAM_APPIDS = [730, 570, 4000, 105600, 292030, 252950, 413150, 367520, 201810, 1145360]
+    return CACHE_STEAM_APPIDS
+
+def buscar_steam_random():
+    """Sorteia um jogo aleatório da base da Steam com alta robustez."""
+    if not estado_app.get('modulo_steam_random', True): return []
+    
+    appids = carregar_lista_steam()
+    
+    # Tenta sortear até achar um que funcione (máximo 20 tentativas)
+    for _ in range(20):
+        appid = random.choice(appids)
+        try:
+            res = requests.get(f"https://store.steampowered.com/api/appdetails?appids={appid}&cc=BR&l=brazilian", timeout=5).json()
+            data = res.get(str(appid), {})
+            
+            if not data.get('success'): continue
+            
+            info = data.get('data', {})
+            if info.get('type') != 'game': continue
+
+            preco = "Grátis" if info.get('is_free') else info.get('price_overview', {}).get('final_formatted', 'N/A')
+            generos = ", ".join([g['description'] for g in info.get('genres', [])[:3]])
+            meta = info.get('metacritic', {}).get('score', 'N/A')
+            img_url = info.get('header_image', '')
+
+            if not img_url: continue
+
+            return [{
+                'tipo': 'STEAM_RANDOM',
+                'titulo': info.get('name', 'Desconhecido'),
+                'img': img_url,
+                'preco': preco,
+                'generos': generos,
+                'score': meta
+            }]
+        except: pass
+    return []
+
 def buscar_jogos_gratis():
     if not estado_app['modulo_jogos']: return []
     
-    url = "https://www.gamerpower.com/api/giveaways?type=game"
+    url = "https://www.gamerpower.com/api/giveaways?type=game&platform=pc"
     plat_filter = estado_app.get('jogos_plataforma', 'todas').lower()
-    
-    # A API não documenta bem filtros compostos. Busca tudo de PC e filtramos manual:
-    url += "&platform=pc"
         
     try:
         res = requests.get(url, headers=HEADERS_NAVEGADOR, timeout=10).json()
@@ -97,14 +165,12 @@ def buscar_jogos_gratis():
             if 'Steam' in plat: loja = 'Steam'
             elif 'Epic' in plat: loja = 'Epic Games'
             
-            if not loja: continue # Ignora jogos que não são nem Steam nem Epic (ex: GOG, Itchio)
-            
+            if not loja: continue 
             if plat_filter == 'steam' and loja != 'Steam': continue
             if plat_filter == 'epic' and loja != 'Epic Games': continue
             
             if titulo not in titulos_vistos:
                 titulos_vistos.add(titulo)
-                
                 jogos.append({
                     'tipo': 'JOGO', 
                     'titulo': titulo, 
@@ -116,139 +182,84 @@ def buscar_jogos_gratis():
         return jogos
     except: return []
 
-import random
-
-# Cache de gêneros por AppID da Steam (evita requests repetidos)
-_cache_generos = {}
-
-def obter_generos_steam(appid):
-    """Consulta a Steam Storefront API e o SteamSpy para obter uma lista completa de tags/gêneros."""
-    if not appid:
-        return []
-    if appid in _cache_generos:
-        return _cache_generos[appid]
-    
-    tags_encontradas = set()
-    
-    # 1. Tenta Steam Storefront API (Gêneros e Categorias)
-    try:
-        url_steam = f"https://store.steampowered.com/api/appdetails?appids={appid}"
-        r = requests.get(url_steam, timeout=5).json()
-        dados = r.get(str(appid), {})
-        if dados.get('success') and 'data' in dados:
-            gen = [g['description'] for g in dados['data'].get('genres', [])]
-            cat = [c['description'] for c in dados['data'].get('categories', [])]
-            for t in gen + cat: tags_encontradas.add(t)
-    except: pass
-    
-    # 2. Tenta SteamSpy para "User Tags" (onde fica Metroidvania, Roguelike, etc.)
-    try:
-        url_spy = f"https://steamspy.com/api.php?request=appdetails&appid={appid}"
-        r_spy = requests.get(url_spy, timeout=5).json()
-        tags_spy = r_spy.get('tags', {})
-        if isinstance(tags_spy, dict):
-            for t in tags_spy.keys(): tags_encontradas.add(t)
-    except: pass
-
-    final_tags = list(tags_encontradas)
-    _cache_generos[appid] = final_tags
-    return final_tags
-
-# Gêneros e Categorias comuns da Steam para auxílio no UI (opcional)
-GENEROS_STEAM_POPULARES = [
-    "Action", "Adventure", "RPG", "Strategy", "Simulation", "Sports", "Racing", 
-    "Indie", "Casual", "Massively Multiplayer", "Single-player", "Multi-player", "Co-op",
-    "Metroidvania", "Platformer", "Action-Adventure", "Horror", "Survival"
-]
-
 def buscar_promocoes_steam():
     if not estado_app.get('modulo_promocoes', True): return []
     
     filtros = [f.lower() for f in estado_app.get('promo_generos', ['todos'])]
     selecionou_todos = 'todos' in filtros or not filtros
+    termo = "" if selecionou_todos else random.choice(filtros)
     
-    # Termo de busca baseado nos marcadores
-    termo = "" if selecionou_todos else " ".join(filtros)
-    
-    # API Oficial Steam Store Search (cc=BR para preços em Reais)
-    url = f"https://store.steampowered.com/api/storesearch/?term={termo}&specials=1&cc=BR&l=brazilian"
+    search_url = f"https://store.steampowered.com/search/?term={termo}&specials=1"
     
     try:
-        res = requests.get(url, headers=HEADERS_NAVEGADOR, timeout=10).json()
-        itens = res.get('items', [])
+        res_html = requests.get(search_url, headers=HEADERS_NAVEGADOR, timeout=10)
+        soup = BeautifulSoup(res_html.text, 'html.parser')
+        cards = soup.find_all('a', class_=re.compile(r"search_result_row"))
         
-        if not itens: return []
+        appids_encontrados = []
+        for card in cards:
+            appid = card.get('data-ds-appid')
+            if appid and ',' not in appid:
+                appids_encontrados.append(appid)
         
-        # Seleciona 10 aleatórios do resultado oficial
-        total_puxar = 10
-        random.shuffle(itens)
-        selecionados = itens[:total_puxar]
-        
+        if not appids_encontrados: return []
+
+        random.shuffle(appids_encontrados)
+        appids_selecionados = appids_encontrados[:10]
+        ids_str = ",".join(appids_selecionados)
+
+        url_batch = f"https://store.steampowered.com/api/appdetails?appids={ids_str}&filters=price_overview,metacritic,basic&cc=BR&l=brazilian"
+        detalhes_batch = requests.get(url_batch, headers=HEADERS_NAVEGADOR, timeout=10).json()
+
         promos = []
-        if selecionados:
-            ids_str = ",".join([str(p.get('id')) for p in selecionados])
-            detalhes_batch = {}
-            try:
-                # Busca detalhes em LOTE (Batch) para ser mais rápido e evitar bloqueio
-                url_batch = f"https://store.steampowered.com/api/appdetails?appids={ids_str}&filters=price_overview,metacritic&cc=BR&l=brazilian"
-                detalhes_batch = requests.get(url_batch, timeout=8).json()
-            except: pass
+        for appid in appids_selecionados:
+            game_data = detalhes_batch.get(str(appid), {})
+            if not game_data.get('success'): continue
+                
+            info = game_data.get('data', {})
+            if info.get('type') != 'game': continue
 
-            for p in selecionados:
-                try:
-                    appid = str(p.get('id'))
-                    info_extra = detalhes_batch.get(appid, {}).get('data', {}) if detalhes_batch else {}
-                    
-                    # Preços via Batch API (mais confiável) ou Fallback
-                    price_data = info_extra.get('price_overview', {})
-                    if price_data:
-                        initial = price_data.get('initial', 0) / 100
-                        final = price_data.get('final', 0) / 100
-                        desconto = price_data.get('discount_percent', 0)
-                    else:
-                        # Fallback se o batch falhar
-                        p_price = p.get('price') or {}
-                        initial = p_price.get('initial_price', 0) / 100
-                        final = p_price.get('final_price', 0) / 100
-                        desconto = p_price.get('discount_percent', 0)
-                    
-                    score = info_extra.get('metacritic', {}).get('score', "N/A")
-                    img_url = f"https://cdn.akamai.steamstatic.com/steam/apps/{appid}/header.jpg"
-
-                    promos.append({
-                        'tipo': 'STEAM_PROMO', 
-                        'titulo': p.get('name', ''), 
-                        'img': img_url,
-                        'preco_normal': f"R$ {initial:.2f}".replace('.', ','),
-                        'preco': f"R$ {final:.2f}".replace('.', ','),
-                        'desconto': f"-{desconto}%",
-                        'score': score
-                    })
-                except: continue
+            price_data = info.get('price_overview', {})
+            if not price_data: continue
+                
+            initial = price_data.get('initial', 0) / 100
+            final = price_data.get('final', 0) / 100
+            desconto = price_data.get('discount_percent', 0)
             
+            score = info.get('metacritic', {}).get('score', "N/A")
+            titulo = info.get('name', 'Steam Promo')
+            img_url = f"https://cdn.akamai.steamstatic.com/steam/apps/{appid}/header.jpg"
+            genero_display = termo.capitalize() if termo else "Promoção"
+
+            promos.append({
+                'tipo': 'STEAM_PROMO', 
+                'titulo': titulo, 
+                'img': img_url,
+                'preco_normal': f"{initial:.2f}".replace('.', ','),
+                'preco': f"{final:.2f}".replace('.', ','),
+                'desconto': f"-{desconto}%",
+                'score': score,
+                'genero': genero_display
+            })
+            if len(promos) >= 6: break
         return promos
     except Exception as e:
-        print(f"Erro ao buscar promoções na API oficial Steam: {e}")
+        print(f"Erro ao buscar promoções Steam (Híbrido): {e}")
         return []
 
 def buscar_gamevicio():
     if not estado_app['modulo_noticias']: return []
-    
     url = "https://www.gamevicio.com/"
     try:
         res = requests.get(url, headers=HEADERS_NAVEGADOR, timeout=10)
         soup = BeautifulSoup(res.text, 'html.parser')
         noticias = []
         titulos_vistos = set()
-        
         cards = soup.find_all('div', class_=re.compile(r"e-loop-item"))
-        
         for card in cards:
             if 'swiper-slide' in card.get('class', []): continue
-                
             img = card.find('img')
             if not img: continue
-                
             src = ""
             for attr in ['data-lazy-src', 'data-src', 'src']:
                 val = img.get(attr, '')
@@ -280,23 +291,19 @@ def buscar_gamevicio():
 
 def buscar_reddit_multiplos():
     if not estado_app['modulo_reddit']: return []
-    
     posts_finais = []
     titulos_vistos = set()
     subs = estado_app.get('lista_subreddits', [])
-    
     for subreddit in subs:
         url = f"https://www.reddit.com/r/{subreddit}/top.rss?t=day"
         try:
             resposta = requests.get(url, headers=HEADERS_NAVEGADOR, timeout=10)
             feed = feedparser.parse(resposta.content)
             adicionados_neste_sub = 0
-            
             for e in feed.entries:
                 titulo = e.title
                 if titulo not in titulos_vistos:
                     autor = e.author.replace('/u/', 'u/') if hasattr(e, 'author') else f'r/{subreddit}'
-                    
                     img_url = None
                     if hasattr(e, 'media_thumbnail') and e.media_thumbnail:
                         img_url = e.media_thumbnail[0]['url']
@@ -360,8 +367,48 @@ def criar_layout(item):
 
     rotacao = estado_app.get('rotacao', -90)
 
+    # ⚡ NOVO LAYOUT: STEAM RANDOM FULLSCREEN
+    if item['tipo'] == 'STEAM_RANDOM':
+        try:
+            res = requests.get(item['img'], timeout=10)
+            capa = Image.open(BytesIO(res.content)).convert("RGB")
+            # Deixa a imagem tela cheia (como o script externo sugeriu)
+            fundo = ImageOps.fit(capa, (480, 320), Image.Resampling.LANCZOS).convert('RGBA')
+        except: fundo = Image.new('RGBA', (480, 320), color='#1e1e2e')
+
+        camada = Image.new('RGBA', (480, 320), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(camada)
+
+        # Gradiente suave escuro na parte de baixo (Efeito "Lower Third")
+        y_gradiente = 200
+        for i in range(50):
+            # Vai de transparente até quase preto (220)
+            alpha = int((i / 50) * 220)
+            draw.line([(0, y_gradiente + i), (480, y_gradiente + i)], fill=(15, 15, 20, alpha))
+        
+        # Preenche o resto até o final com o fundo escuro
+        draw.rectangle([0, y_gradiente + 50, 480, 320], fill=(15, 15, 20, 220))
+
+        # Tag no topo pra identificar
+        desenhar_etiqueta_topo(draw, 20, 20, "🎲 Explorar Steam", f_plat, (63, 81, 181, 230))
+        
+        if item['score'] != 'N/A':
+            draw.rounded_rectangle([390, 20, 460, 50], fill=(250, 208, 0, 220), radius=6)
+            draw.text((400, 26), f"MC {item['score']}", font=f_plat, fill=(0, 0, 0, 255))
+
+        # Título grande e branco no gradiente
+        linhas_titulo = textwrap.wrap(item['titulo'], width=38)[:1]
+        desenhar_texto_centralizado(draw, y_gradiente + 20, linhas_titulo[0], f_gratis, cor_texto=(255, 255, 255, 255))
+
+        # Gênero e Preço formatados como "Ação, RPG  •  R$ 19,90"
+        info_texto = f"{item['generos']}   •   {item['preco']}"
+        desenhar_texto_centralizado(draw, y_gradiente + 65, info_texto, f_plat, cor_texto=(166, 227, 161, 255))
+
+        img_final = Image.alpha_composite(fundo, camada).convert('RGB')
+        return img_final.rotate(rotacao, expand=True)
+
     # LAYOUT 1: JOGOS
-    if item['tipo'] == 'JOGO':
+    elif item['tipo'] == 'JOGO':
         try:
             res = requests.get(item['img'], timeout=10)
             capa = Image.open(BytesIO(res.content)).convert("RGB")
@@ -395,15 +442,12 @@ def criar_layout(item):
             res = requests.get(item['img'], timeout=10)
             capa = Image.open(BytesIO(res.content)).convert("RGB")
             
-            # Melhora Proporcionalidade: Fundo desfocado + arte centralizada proporcional
-            # 1. Cria o fundo desfocado (preenche tudo)
             fundo_base = ImageOps.fit(capa, (480, 320), bleed=0.1)
             fundo = fundo_base.filter(ImageFilter.GaussianBlur(radius=15))
             
-            # 2. Cria a camada da arte centralizada proporcionalmente (sem cortar)
-            arte_proporcional = ImageOps.contain(capa, (440, 240)) # Deixa espaço para textos
+            arte_proporcional = ImageOps.contain(capa, (440, 240))
             pos_x = (480 - arte_proporcional.width) // 2
-            pos_y = 50 # Um pouco abaixo do topo
+            pos_y = 50 
             
             fundo.paste(arte_proporcional, (pos_x, pos_y))
             fundo = fundo.convert('RGBA')
@@ -412,29 +456,25 @@ def criar_layout(item):
         camada = Image.new('RGBA', (480, 320), (0, 0, 0, 0))
         draw = ImageDraw.Draw(camada)
 
-        # Selo Metacritic
-        draw.rounded_rectangle([20, 20, 75, 50], fill=(250, 208, 0, 220), radius=6)
-        draw.text((28, 26), f"M {item['score']}", font=f_plat, fill=(0, 0, 0, 255))
+        tag_genero = f"🏷️ {item.get('genero', 'Steam')}"
+        desenhar_etiqueta_topo(draw, 20, 20, tag_genero, f_plat, (103, 58, 183, 230))
 
-        # Loja Steam
+        if item['score'] != "N/A":
+            draw.rounded_rectangle([20, 60, 75, 90], fill=(250, 208, 0, 220), radius=6)
+            draw.text((28, 66), f"M {item['score']}", font=f_plat, fill=(0, 0, 0, 255))
+
         draw.rounded_rectangle([310, 20, 460, 50], fill=(24, 24, 37, 220), radius=6)
-        draw.text((325, 26), "🎮 Promoção Steam", font=f_plat, fill=(137, 207, 240, 255))
+        draw.text((325, 26), "🎮 Steam", font=f_plat, fill=(137, 207, 240, 255))
         
-        # Caixa de Preços
         draw.rounded_rectangle([250, 230, 460, 300], fill=(17, 17, 27, 230), radius=8)
-        
-        # Etiqueta de % Desconto
         draw.rounded_rectangle([260, 245, 335, 285], fill=(76, 175, 80, 255), radius=4)
         draw.text((265, 252), item['desconto'], font=f_titulo, fill=(255, 255, 255, 255))
         
-        # Preço Cortado
-        texto_de = f"De: ${item['preco_normal']}"
+        texto_de = f"De: R$ {item['preco_normal']}"
         draw.text((345, 238), texto_de, font=f_pequena, fill=(166, 173, 200, 255))
         comp = len(texto_de) * 8
         draw.line([(345, 247), (345 + comp, 247)], fill=(243, 139, 168, 255), width=2)
-        
-        # Preço Novo Promocional
-        draw.text((345, 260), f"${item['preco']}", font=f_gratis, fill=(166, 227, 161, 255))
+        draw.text((345, 260), f"R$ {item['preco']}", font=f_gratis, fill=(166, 227, 161, 255))
 
         img_final = Image.alpha_composite(fundo, camada).convert('RGB')
         return img_final.rotate(rotacao, expand=True)
@@ -454,7 +494,6 @@ def criar_layout(item):
         draw.rectangle([0, 220, 480, 320], fill=(0, 0, 0, 160))
         
         linhas_titulo = textwrap.wrap(item['titulo'], width=45)[:2]
-        
         altura_linha = 26
         y_atual = 220 + (100 - (len(linhas_titulo) * altura_linha)) // 2
 
@@ -531,8 +570,6 @@ force_restart = False
 def update_preview(img_pil):
     global preview_bytes
     img_byte_arr = BytesIO()
-    
-    # Desfaz a rotação da imagem apenas para o web preview ficar natural (paisagem 480x320)
     rotacao_atual = estado_app.get('rotacao', -90)
     if rotacao_atual != 0:
         img_pil = img_pil.rotate(-rotacao_atual, expand=True)
@@ -542,55 +579,25 @@ def update_preview(img_pil):
         preview_bytes = img_byte_arr.getvalue()
 
 def auto_descobrir_com():
-    """Detecção robusta da porta COM da tela Turing Smart Screen.
-    Prioridade:
-      1. Identifica pelo serial_number ou VID/PID exato da tela Turing
-      2. Fallback: procura chips CH340/CH341 (conversor USB-Serial comum nessas telas)
-      3. Último recurso: ignora e retorna None (painel continua apenas na web)
-    """
     try:
         portas = list(serial.tools.list_ports.comports())
-        if not portas:
-            print("[LCD] Nenhuma porta serial encontrada no sistema.")
-            return None
-        
-        print(f"[LCD] Portas seriais encontradas: {[(p.device, p.description, p.vid, p.pid) for p in portas]}")
-        
-        # PRIORIDADE 1: Método exato da biblioteca Turing (serial number ou VID:PID)
+        if not portas: return None
         for p in portas:
-            if p.serial_number == "USB35INCHIPSV2":
-                print(f"[LCD] ✅ Tela Turing detectada por número de série: {p.device}")
+            if p.serial_number == "USB35INCHIPSV2" or (p.vid == 0x1a86 and p.pid == 0x5722):
                 return p.device
-            if p.vid == 0x1a86 and p.pid == 0x5722:
-                print(f"[LCD] ✅ Tela Turing detectada por VID/PID (1a86:5722): {p.device}")
-                return p.device
-        
-        # PRIORIDADE 2: Chip CH340/CH341 (convertidor USB-Serial usado por essas telas)
         for p in portas:
             desc = (p.description or '').upper()
-            if 'CH340' in desc or 'CH341' in desc:
-                print(f"[LCD] ⚠️ Chip CH340/CH341 encontrado (provável tela): {p.device} ({p.description})")
+            if 'CH340' in desc or 'CH341' in desc or p.vid == 0x1a86:
                 return p.device
-        
-        # PRIORIDADE 3: VID 0x1a86 (fabricante do CH340) com qualquer PID
-        for p in portas:
-            if p.vid == 0x1a86:
-                print(f"[LCD] ⚠️ Dispositivo do fabricante CH340 encontrado: {p.device} ({p.description})")
-                return p.device
-        
-        # NÃO retorna porta aleatória — evita conectar em mouse/teclado/bluetooth
-        print("[LCD] ⚠️ Nenhuma tela Turing/CH340 reconhecida entre as portas disponíveis.")
         return None
     except Exception as e:
-        print(f"[LCD] Erro durante detecção de portas: {e}")
+        print(f"[LCD] Erro: {e}")
         return None
 
 display_global = None
 
 def validar_porta_com(porta):
-    """Testa se a porta COM existe e pode ser aberta. Retorna True/False."""
-    if not porta:
-        return False
+    if not porta: return False
     try:
         teste = serial.Serial(porta, 115200, timeout=1)
         teste.close()
@@ -604,9 +611,7 @@ def run_worker_cycle():
     
     porta = estado_app.get('porta_com', 'AUTO')
     
-    # Se a porta estiver como AUTO ou vazia, faz detecção inteligente
     if not porta or porta.strip().upper() == 'AUTO':
-        print("[LCD] Modo automático — buscando tela Turing...")
         porta_descoberta = auto_descobrir_com()
         if porta_descoberta:
             porta = porta_descoberta
@@ -614,22 +619,15 @@ def run_worker_cycle():
             salvar_configuracao()
         else:
             porta_manual = estado_app.get('_porta_manual', None)
-            if porta_manual:
-                porta = porta_manual
-            else:
-                porta = None
+            if porta_manual: porta = porta_manual
+            else: porta = None
 
-    # Pré-validação: testa se a porta realmente existe antes de passar ao driver
-    # (o driver chama os._exit() se falhar, matando o processo inteiro)
     if porta and not validar_porta_com(porta):
-        print(f"⚠️ Porta {porta} não está disponível. Rodando apenas no modo Web.")
+        print(f"⚠️ Porta {porta} não está disponível.")
         porta = None
 
-    # Se a porta mudou ou se não temos conexão, reconecta
     if display_global is not None and getattr(display_global, 'com_port', None) != porta:
-        print(f"[LCD] Porta alterada ou reconexão solicitada. Fechando a anterior...")
-        try:
-            display_global.closeSerial()
+        try: display_global.closeSerial()
         except: pass
         display_global = None
 
@@ -639,18 +637,10 @@ def run_worker_cycle():
             display_global.Reset()
             display_global.InitializeComm()
             print(f"✅ Conectado na porta {porta}!")
-        except SystemExit:
-            print(f"⚠️ Driver tentou encerrar o programa ao conectar na {porta}. Ignorando.")
-            display_global = None
         except Exception as e:
-            print(f"⚠️ Aviso LCD: Não foi possível conectar na {porta} ({e}). Mostrarei apenas a Web.")
             display_global = None
-    elif display_global is None:
-        if LcdCommRevA is None:
-            print("⚠️ Driver LcdCommRevA não disponível — rodando apenas no modo Web.")
-        elif not porta:
-            print("⚠️ Nenhuma tela disponível — rodando apenas no modo Web Preview.")
-    else:
+    
+    if display_global is not None:
         try: display_global.Clear()
         except: pass
 
@@ -662,11 +652,13 @@ def run_worker_cycle():
             promos = buscar_promocoes_steam()
             noticias = buscar_gamevicio()
             reddit = buscar_reddit_multiplos() 
-            conteudo = promos + jogos + noticias + reddit
+            steam_aleatorio = buscar_steam_random()  # ⚡ Adicionando o Aleatório da Steam
+            
+            # Embaralha os conteudos para a tela ficar dinâmica
+            conteudo = promos + jogos + noticias + reddit + steam_aleatorio
             
             if not conteudo:
                 update_preview(gerar_tela_padrao("Sem conteúdo ativo."))
-                # Aguarda até o próximo ciclo ou até dar restart
                 for _ in range(5):
                     if force_restart or not is_running: break
                     time.sleep(1)
@@ -679,8 +671,7 @@ def run_worker_cycle():
                 update_preview(img_pronta)
                 
                 if display_global:
-                    try:
-                        display_global.DisplayPILImage(img_pronta, 0, 0)
+                    try: display_global.DisplayPILImage(img_pronta, 0, 0)
                     except: pass 
                 
                 t_slide = estado_app.get('tempo_slide', 12)
@@ -694,8 +685,6 @@ def run_worker_cycle():
             for _ in range(5):
                 if force_restart or not is_running: break
                 time.sleep(1)
-            
-    print("[Worker] Ciclo encerrado ou reiniciando.")
 
 def worker_thread():
     global force_restart
@@ -703,7 +692,6 @@ def worker_thread():
         force_restart = False
         run_worker_cycle()
         if is_running and force_restart:
-            print("[Worker] Reinicialização solicitada, religando...")
             time.sleep(0.5)
 
 # ==========================================
@@ -752,19 +740,15 @@ def restart():
     return jsonify({"status": "reiniciando"}), 200
 
 def pedir_porta_com():
-    """Pergunta a porta COM ao usuário no terminal se a detecção automática falhar."""
     porta_config = estado_app.get('porta_com', 'AUTO')
     
-    # Se já tem uma porta fixa configurada (não AUTO), verifica se ela ainda existe
     if porta_config and porta_config.strip().upper() != 'AUTO':
         if validar_porta_com(porta_config):
             print(f"[LCD] ✅ Porta salva {porta_config} validada com sucesso.")
             return
         else:
-            print(f"[LCD] ⚠️ Porta salva {porta_config} não existe mais. Refazendo detecção...")
             estado_app['porta_com'] = 'AUTO'
     
-    # Tenta auto-detectar primeiro
     porta_auto = auto_descobrir_com()
     if porta_auto:
         print(f"[LCD] ✅ Tela detectada automaticamente: {porta_auto}")
@@ -772,63 +756,35 @@ def pedir_porta_com():
         salvar_configuracao()
         return
     
-    # Auto-detecção falhou — pede ao usuário
-    print("")
-    print("=======================================")
-    print("  ⚠️  TELA NÃO DETECTADA AUTOMATICAMENTE")
-    print("=======================================")
-    
     try:
         portas = list(serial.tools.list_ports.comports())
         if portas:
-            print("")
-            print("  Portas disponíveis no sistema:")
-            for i, p in enumerate(portas):
-                print(f"    [{i+1}] {p.device} — {p.description}")
-            print("")
-        else:
-            print("")
-            print("  Nenhuma porta serial encontrada.")
-            print("  Verifique se a tela está conectada via USB.")
-            print("")
-    except:
-        pass
-    
-    print("  Digite a porta COM da sua tela (ex: COM3, COM5)")
-    print("  Ou tecle ENTER para rodar apenas o painel Web sem tela.")
-    print("")
+            print("\n  Portas disponíveis:")
+            for i, p in enumerate(portas): print(f"    [{i+1}] {p.device}")
+    except: pass
     
     try:
-        resposta = input("  Porta COM > ").strip()
-    except (EOFError, KeyboardInterrupt):
-        resposta = ""
+        resposta = input("\n  Porta COM > ").strip()
+    except: resposta = ""
     
     if resposta and resposta.upper() != 'SKIP':
-        porta_final = resposta.upper()
-        estado_app['porta_com'] = porta_final
-        estado_app['_porta_manual'] = porta_final
+        estado_app['porta_com'] = resposta.upper()
+        estado_app['_porta_manual'] = resposta.upper()
         salvar_configuracao()
-        print(f"  ✅ Porta configurada: {porta_final}")
     else:
-        print("  ⏭️ Rodando sem tela — apenas Web Preview.")
         estado_app['_porta_manual'] = None
-    print("")
 
 def main():
     carregar_configuracao()
-    
-    # Pergunta a porta COM se necessário (antes de iniciar threads)
     pedir_porta_com()
     
-    # Inicia a thread de LCD
     t = threading.Thread(target=worker_thread, daemon=True)
     t.start()
     
-    print("=======================================")
+    print("\n=======================================")
     print("  🌐 Acesso WEB: http://localhost:5000 ")
-    print("=======================================")
+    print("=======================================\n")
     
-    # Inicia o servidor Web
     app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
 
 if __name__ == "__main__":
