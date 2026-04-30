@@ -164,8 +164,8 @@ GENEROS_STEAM_POPULARES = [
 def buscar_promocoes_steam():
     if not estado_app.get('modulo_promocoes', True): return []
     
-    # storeID=1 (Steam), onSale=1, metacritic=80+
-    url = "https://www.cheapshark.com/api/1.0/deals?storeID=1&onSale=1&metacritic=80&steamRating=80&pageSize=60"
+    # storeID=1 (Steam), onSale=1, metacritic=65+, steamRating=70+, pool de 150 jogos
+    url = "https://www.cheapshark.com/api/1.0/deals?storeID=1&onSale=1&metacritic=65&steamRating=70&pageSize=150"
     
     filtros = [f.lower() for f in estado_app.get('promo_generos', ['todos'])]
     selecionou_todos = 'todos' in filtros or not filtros
@@ -178,7 +178,7 @@ def buscar_promocoes_steam():
         if not selecionou_todos:
             random.shuffle(res)
             for p in res:
-                if len(candidatos) >= 5:
+                if len(candidatos) >= 10:
                     break
                 appid = p.get('steamAppID', '')
                 tags_jogo = [t.lower() for t in obter_generos_steam(appid)]
@@ -187,9 +187,9 @@ def buscar_promocoes_steam():
                 if any(f in tags_jogo for f in filtros):
                     candidatos.append(p)
         else:
-            # Sem filtro: embaralha e pega 5
-            if len(res) > 5:
-                candidatos = random.sample(res, 5)
+            # Sem filtro: embaralha e pega 10
+            if len(res) > 10:
+                candidatos = random.sample(res, 10)
             else:
                 candidatos = res
         
