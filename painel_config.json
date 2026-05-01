@@ -1,0 +1,20 @@
+{
+    "modulo_jogos": false,
+    "jogos_plataforma": "todas",
+    "modulo_noticias": false,
+    "modulo_reddit": false,
+    "modulo_steam_random": false,
+    "modulo_promocoes": true,
+    "promo_generos": [
+        "Metroidvania", "Soulslike"
+    ],
+    "lista_subreddits": [
+        "emulation",
+        "PiratedGames",
+        "gadgets",
+        "SBCGaming"
+    ],
+    "tempo_slide": 12,
+    "porta_com": "COM9",
+    "rotacao": -90
+}

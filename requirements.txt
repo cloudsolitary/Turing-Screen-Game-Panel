@@ -1,0 +1,9 @@
+# Hub Gamer Dashboard - Dependências
+pyserial>=3.5
+Flask>=3.0.0
+numpy>=1.20.0
+requests>=2.0.0
+Pillow>=9.0.0
+beautifulsoup4>=4.10.0
+feedparser>=6.0.0
+pyinstaller>=6.0.0
