@@ -11,7 +11,7 @@ import threading
 import random
 from io import BytesIO
 from bs4 import BeautifulSoup
-from PIL import Image, ImageDraw, ImageFont, ImageOps
+from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageFilter
 from flask import Flask, request, jsonify, Response, render_template_string
 import serial.tools.list_ports
 
@@ -36,11 +36,18 @@ estado_app = {
     "modulo_reddit": True,
     "modulo_steam_random": True, 
     "modulo_promocoes": True,
+    
+    # TEMPOS INDIVIDUAIS DE CADA MÓDULO (em segundos)
+    "tempo_jogos": 12,
+    "tempo_promocoes": 15,
+    "tempo_random": 10,
+    "tempo_noticias": 14,
+    "tempo_reddit": 14,
+    
     "promo_generos": ["metroidvania", "rpg"],
     "lista_subreddits": ['emulation', 'PiratedGames', 'gadgets', 'SBCGaming'],
-    "tempo_slide": 12,
     "porta_com": "AUTO",
-    "rotacao": -90
+    "rotacao": 270 # 270 = -90 graus (padrão em pé)
 }
 
 preview_lock = threading.Lock()
@@ -73,6 +80,7 @@ HTML_TEMPLATE = """
         .checkbox-group { display: flex; align-items: center; margin-bottom: 10px; }
         .checkbox-group input { margin-right: 10px; width: auto; transform: scale(1.2); }
         .checkbox-group label { margin: 0; font-weight: normal; cursor: pointer; }
+        .time-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; }
         button { width: 100%; padding: 12px; background: #4CAF50; color: white; border: none; border-radius: 5px; font-size: 1rem; font-weight: bold; cursor: pointer; transition: 0.3s; margin-top: 10px;}
         button:hover { background: #45a049; }
         .btn-danger { background: #d32f2f; }
@@ -90,23 +98,39 @@ HTML_TEMPLATE = """
         <div class="card">
             <h2>Módulos Ativos</h2>
             <div class="checkbox-group"><input type="checkbox" id="mod_jogos"><label for="mod_jogos">Jogos Grátis</label></div>
-            <div class="checkbox-group"><input type="checkbox" id="mod_promocoes"><label for="mod_promocoes">Promoções Steam (Motor Direto)</label></div>
+            <div class="checkbox-group"><input type="checkbox" id="mod_promocoes"><label for="mod_promocoes">Promoções Steam</label></div>
             <div class="checkbox-group"><input type="checkbox" id="mod_random"><label for="mod_random">Explorador Steam Aleatório</label></div>
             <div class="checkbox-group"><input type="checkbox" id="mod_noticias"><label for="mod_noticias">Notícias (GameVicio)</label></div>
             <div class="checkbox-group"><input type="checkbox" id="mod_reddit"><label for="mod_reddit">Reddit</label></div>
         </div>
 
         <div class="card">
-            <h2>Configurações</h2>
-            <label>Tags da Steam (Gêneros ou User Tags, separados por vírgula):</label>
-            <input type="text" id="promo_generos" placeholder="Ex: metroidvania, rpg, anime, souls-like">
-            <div class="note">A busca agora é feita direto na barra de pesquisa da Steam! Funciona com qualquer tag existente.</div>
+            <h2>Tempo de Exibição (Segundos)</h2>
+            <div class="time-grid">
+                <div><label>Jogos Grátis:</label><input type="number" id="t_jogos" min="5" max="60"></div>
+                <div><label>Steam Promo:</label><input type="number" id="t_promos" min="5" max="60"></div>
+                <div><label>Steam Aleatório:</label><input type="number" id="t_random" min="5" max="60"></div>
+                <div><label>Notícias:</label><input type="number" id="t_noticias" min="5" max="60"></div>
+                <div><label>Reddit:</label><input type="number" id="t_reddit" min="5" max="60"></div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Configurações da Tela</h2>
+            
+            <label>Rotação (Orientação da Telinha):</label>
+            <select id="rotacao">
+                <option value="0">0° (Paisagem Padrão)</option>
+                <option value="90">90° (Retrato Direita)</option>
+                <option value="180">180° (Paisagem Invertida)</option>
+                <option value="270">270° (Retrato Esquerda)</option>
+            </select>
+            
+            <label style="margin-top: 15px;">Tags da Steam (Gêneros, separados por vírgula):</label>
+            <input type="text" id="promo_generos" placeholder="Ex: metroidvania, rpg, anime">
             
             <label style="margin-top: 15px;">Subreddits (separados por vírgula):</label>
             <input type="text" id="lista_subreddits" placeholder="Ex: gadgets, emulation">
-
-            <label style="margin-top: 15px;">Tempo por Slide (segundos):</label>
-            <input type="number" id="tempo_slide" min="5" max="60">
 
             <button onclick="salvarConfig()">Salvar Configurações</button>
         </div>
@@ -128,9 +152,15 @@ HTML_TEMPLATE = """
             document.getElementById('mod_noticias').checked = data.modulo_noticias;
             document.getElementById('mod_reddit').checked = data.modulo_reddit;
             
+            document.getElementById('t_jogos').value = data.tempo_jogos;
+            document.getElementById('t_promos').value = data.tempo_promocoes;
+            document.getElementById('t_random').value = data.tempo_random;
+            document.getElementById('t_noticias').value = data.tempo_noticias;
+            document.getElementById('t_reddit').value = data.tempo_reddit;
+            
+            document.getElementById('rotacao').value = data.rotacao;
             document.getElementById('promo_generos').value = data.promo_generos.join(', ');
             document.getElementById('lista_subreddits').value = data.lista_subreddits.join(', ');
-            document.getElementById('tempo_slide').value = data.tempo_slide;
         });
 
         function salvarConfig() {
@@ -140,7 +170,14 @@ HTML_TEMPLATE = """
                 modulo_steam_random: document.getElementById('mod_random').checked,
                 modulo_noticias: document.getElementById('mod_noticias').checked,
                 modulo_reddit: document.getElementById('mod_reddit').checked,
-                tempo_slide: parseInt(document.getElementById('tempo_slide').value),
+                
+                tempo_jogos: parseInt(document.getElementById('t_jogos').value),
+                tempo_promocoes: parseInt(document.getElementById('t_promos').value),
+                tempo_random: parseInt(document.getElementById('t_random').value),
+                tempo_noticias: parseInt(document.getElementById('t_noticias').value),
+                tempo_reddit: parseInt(document.getElementById('t_reddit').value),
+                
+                rotacao: parseInt(document.getElementById('rotacao').value),
                 promo_generos: document.getElementById('promo_generos').value.split(',').map(s => s.trim()).filter(s => s),
                 lista_subreddits: document.getElementById('lista_subreddits').value.split(',').map(s => s.trim()).filter(s => s)
             };
@@ -163,11 +200,11 @@ HTML_TEMPLATE = """
 """
 
 # ==========================================
-# CACHES, MAPAS E MOTORES DE BUSCA
+# CACHES E MEMÓRIA
 # ==========================================
 CACHE_STEAM_APPIDS = []
 _cache_generos = {}
-HISTORICO_PROMOCOES = [] # Garante que os jogos rodem sem repetir!
+HISTORICO_PROMOCOES = []
 
 # ==========================================
 # FUNÇÕES DE BUSCA
@@ -236,11 +273,9 @@ def buscar_promocoes_steam():
     filtros_lower = [g.lower().strip() for g in config_genero if g.strip()]
     if not filtros_lower: filtros_lower = ['todos']
     
-    # Sorteia uma das tags para buscar as promoções na loja
     tag_escolhida = random.choice(filtros_lower)
     todas_promos = []
     
-    # Fazemos a busca direto no Motor Oficial da Steam. (Até 3 páginas = 150 jogos)
     for pagina in range(1, 4):
         if tag_escolhida == 'todos':
             url = f"https://store.steampowered.com/search/?specials=1&page={pagina}&cc=BR&l=brazilian"
@@ -253,11 +288,11 @@ def buscar_promocoes_steam():
             soup = BeautifulSoup(res.text, 'html.parser')
             rows = soup.find_all('a', class_='search_result_row')
             
-            if not rows: break # Fim das páginas de resultados da Steam
+            if not rows: break 
             
             for row in rows:
                 appid = row.get('data-ds-appid')
-                if not appid or ',' in appid: continue # Ignora bundles
+                if not appid or ',' in appid: continue 
                 
                 title_tag = row.find('span', class_='title')
                 title = title_tag.text.strip() if title_tag else "Promoção Steam"
@@ -272,14 +307,12 @@ def buscar_promocoes_steam():
                 
                 img = f"https://cdn.akamai.steamstatic.com/steam/apps/{appid}/header.jpg"
                 
-                # Extrai a nota da comunidade Steam
                 score = 'N/A'
                 review_tag = row.find('span', class_=re.compile(r'search_review_summary'))
                 if review_tag and review_tag.has_attr('data-tooltip-html'):
                     match = re.search(r'(\d+)%', review_tag['data-tooltip-html'])
                     if match: score = match.group(1)
                     
-                # Formata a tag escolhida bonitinha para a tela
                 if tag_escolhida == 'todos': tag_exibicao = "Promoção"
                 elif len(tag_escolhida) <= 3: tag_exibicao = tag_escolhida.upper()
                 else: tag_exibicao = tag_escolhida.title()
@@ -299,10 +332,8 @@ def buscar_promocoes_steam():
             
     if not todas_promos: return []
     
-    # Motor Anti-Repetição (Filtra os que já vimos)
     promos_novas = [p for p in todas_promos if p['appid'] not in HISTORICO_PROMOCOES]
     
-    # Se todos os jogos daquela tag já foram mostrados, limpa a memória e começa de novo!
     if len(promos_novas) < 5:
         print(f"[Painel] Esgotaram as novidades da tag '{tag_escolhida}'. Resetando histórico...")
         HISTORICO_PROMOCOES.clear()
@@ -311,7 +342,6 @@ def buscar_promocoes_steam():
     random.shuffle(promos_novas)
     promos_finais = promos_novas[:5]
     
-    # Salva no histórico pra não repetir na próxima
     for p in promos_finais:
         HISTORICO_PROMOCOES.append(p['appid'])
         
@@ -461,37 +491,42 @@ def criar_layout(item):
     except:
         f_pequena = f_plat = f_tipo = f_gratis = f_titulo = f_pequena_bold = ImageFont.load_default()
 
-    rotacao = estado_app.get('rotacao', -90)
+    rotacao = estado_app.get('rotacao', 270)
 
-    # LAYOUT 1: STEAM
+    # LAYOUT 1: STEAM (Imagem 100% Inteira com Fundo Borrado Premium)
     if item['tipo'] in ['STEAM_RANDOM', 'STEAM_PROMO']:
         try:
             res = requests.get(item['img'], timeout=10)
             capa = Image.open(BytesIO(res.content)).convert("RGB")
+            
+            fundo_blur = ImageOps.fit(capa, (480, 320), Image.Resampling.LANCZOS)
+            fundo_blur = fundo_blur.filter(ImageFilter.GaussianBlur(radius=20))
+            fundo = fundo_blur.convert('RGBA')
+            
             scale = min(480 / capa.width, 320 / capa.height)
             new_w = int(capa.width * scale)
             new_h = int(capa.height * scale)
-            thumb = capa.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            capa_inteira = capa.resize((new_w, new_h), Image.Resampling.LANCZOS)
             
-            fundo = Image.new('RGBA', (480, 320), color='#151515')
             px = (480 - new_w) // 2
-            py = (320 - new_h) // 2
-            fundo.paste(thumb, (px, py))
+            py = max(0, (260 - new_h) // 2) 
+            fundo.paste(capa_inteira, (px, py))
+            
         except: 
             fundo = Image.new('RGBA', (480, 320), color='#151515')
 
         camada = Image.new('RGBA', (480, 320), (0, 0, 0, 0))
         draw = ImageDraw.Draw(camada)
 
-        lt_h = 100
-        lt_y = 320 - lt_h
-        for i in range(25):
-            alpha_y = lt_y - 25 + i
-            if 0 <= alpha_y < 320:
-                alpha = int((i / 25) * 230)
-                draw.line([(0, alpha_y), (480, alpha_y)], fill=(15, 15, 20, alpha))
-        draw.rectangle([0, lt_y, 480, 320], fill=(15, 15, 20, 255))
+        start_y = 120
+        end_y = 320
+        for y in range(start_y, end_y):
+            progress = (y - start_y) / (end_y - start_y)
+            alpha = int((progress ** 1.8) * 255) 
+            draw.line([(0, y), (480, y)], fill=(15, 15, 20, alpha))
 
+        lt_y = 220
+        
         linhas_titulo = textwrap.wrap(item['titulo'], width=35)[:1]
         desenhar_texto_centralizado(draw, lt_y + 10, linhas_titulo[0], f_gratis, cor_texto=(166, 227, 161, 255))
 
@@ -508,7 +543,6 @@ def criar_layout(item):
             except:
                 sc_col = (166, 227, 161, 255)
             
-            # Adiciona Estrela para Rating da Steam, ou MC para Metacritic
             prefix = "⭐" if item['tipo'] == 'STEAM_PROMO' else "MC"
             sufix = "%" if item['tipo'] == 'STEAM_PROMO' else ""
             mc_texto = f"{prefix} {item['score']}{sufix}"
@@ -631,7 +665,7 @@ def gerar_tela_padrao(mensagem="Turing Smart Screen"):
         f_titulo = ImageFont.load_default()
     
     desenhar_texto_centralizado(draw, 140, mensagem, f_titulo, cor_texto=(255, 255, 255, 255))
-    return img_final.rotate(estado_app.get('rotacao', -90), expand=True)
+    return img_final.rotate(estado_app.get('rotacao', 270), expand=True)
 
 # ==========================================
 # WORKER BACKGROUND (LCD & PREVIEW)
@@ -643,7 +677,8 @@ def update_preview(img_pil):
     global preview_bytes
     img_byte_arr = BytesIO()
     
-    rotacao_atual = estado_app.get('rotacao', -90)
+    # A preview na web sempre desfaz a rotação física para você ver reto no PC
+    rotacao_atual = estado_app.get('rotacao', 270)
     if rotacao_atual != 0:
         img_pil = img_pil.rotate(-rotacao_atual, expand=True)
         
@@ -737,7 +772,21 @@ def run_worker_cycle():
                     try: display_global.DisplayPILImage(img_pronta, 0, 0)
                     except: pass 
                 
-                t_slide = estado_app.get('tempo_slide', 12)
+                # --- SISTEMA INTELIGENTE DE TEMPO ---
+                tipo = item.get('tipo')
+                if tipo == 'JOGO':
+                    t_slide = estado_app.get('tempo_jogos', 12)
+                elif tipo == 'STEAM_PROMO':
+                    t_slide = estado_app.get('tempo_promocoes', 12)
+                elif tipo == 'STEAM_RANDOM':
+                    t_slide = estado_app.get('tempo_random', 12)
+                elif tipo == 'GAMEVICIO':
+                    t_slide = estado_app.get('tempo_noticias', 12)
+                elif tipo == 'REDDIT':
+                    t_slide = estado_app.get('tempo_reddit', 12)
+                else:
+                    t_slide = 12
+                
                 t_elapsed = 0
                 while t_elapsed < t_slide and is_running and not force_restart:
                     time.sleep(1)
