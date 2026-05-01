@@ -1,4 +1,5 @@
 {
+<<<<<<< HEAD
     "modulo_jogos": false,
     "jogos_plataforma": "todas",
     "modulo_noticias": false,
@@ -7,6 +8,15 @@
     "modulo_promocoes": true,
     "promo_generos": [
         "Metroidvania", "Soulslike"
+=======
+    "modulo_jogos": true,
+    "jogos_plataforma": "todas",
+    "modulo_noticias": false,
+    "modulo_reddit": false,
+    "modulo_promocoes": true,
+    "promo_generos": [
+        "metroidvania"
+>>>>>>> c469aadac8798afd2970f5365ac7397c71de7339
     ],
     "lista_subreddits": [
         "emulation",
@@ -16,5 +26,10 @@
     ],
     "tempo_slide": 12,
     "porta_com": "COM9",
+<<<<<<< HEAD
     "rotacao": -90
+=======
+    "rotacao": -90,
+    "promo_genero": "metroidvania"
+>>>>>>> c469aadac8798afd2970f5365ac7397c71de7339
 }

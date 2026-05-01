@@ -131,6 +131,16 @@
                                 <span class="slider"></span>
                             </label>
                         </div>
+<<<<<<< HEAD
+=======
+                        <div class="bg-zinc-800/50 p-4 rounded-xl flex justify-between items-center border border-zinc-700/50 hover:border-zinc-500 transition-colors">
+                            <span>🎲 Explorar Steam</span>
+                            <label class="switch">
+                                <input type="checkbox" id="modulo_steam_random" name="modulo_steam_random">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+>>>>>>> c469aadac8798afd2970f5365ac7397c71de7339
                     </div>
                 </div>
 
@@ -157,6 +167,7 @@
                         </select>
                     </div>
 
+<<<<<<< HEAD
                     <div>
                         <label class="block text-sm font-medium text-gray-400 mb-1">Gênero das Promoções Steam</label>
                         <select id="promo_genero" name="promo_genero" class="w-full bg-zinc-800 border border-zinc-700 text-white rounded px-3 py-2 outline-none focus:border-primary">
@@ -173,6 +184,29 @@
                             <option value="horror">👻 Horror</option>
                         </select>
                     </div>
+=======
+                <!-- Filtros de Marcadores Steam -->
+                <div>
+                    <h3 class="text-lg text-primary mb-3 font-medium">Marcadores da Steam (Filtros de Promoção)</h3>
+                    <p class="text-xs text-zinc-500 mb-2">Digite marcadores oficiais (ex: Metroidvania, RPG, Co-op). Se vazio ou "todos", mostra qualquer oferta.</p>
+                    <div class="flex space-x-2 mb-3">
+                        <input type="text" id="newPromoTag" placeholder="Ex: Metroidvania" class="flex-1 bg-zinc-800 border border-zinc-700 text-white rounded px-4 py-2 focus:outline-none focus:border-primary">
+                        <button type="button" onclick="addPromoTag()" class="bg-primary hover:bg-violet-600 text-white px-4 py-2 rounded transition-colors font-medium">Adicionar</button>
+                    </div>
+                    <div id="promoTagsContainer" class="flex flex-wrap gap-2 mb-3">
+                        <!-- Tags chips will be appended here -->
+                    </div>
+                    <div class="flex flex-wrap gap-1 mt-2">
+                        <span class="text-xs text-zinc-600 mr-2 self-center">Sugestões:</span>
+                        <button type="button" onclick="quickAddTag('Metroidvania')" class="text-[10px] bg-zinc-800 hover:bg-zinc-700 text-zinc-400 px-2 py-0.5 rounded border border-zinc-700 transition-colors">Metroidvania</button>
+                        <button type="button" onclick="quickAddTag('Soulslike')" class="text-[10px] bg-zinc-800 hover:bg-zinc-700 text-zinc-400 px-2 py-0.5 rounded border border-zinc-700 transition-colors">Soulslike</button>
+                        <button type="button" onclick="quickAddTag('RPG')" class="text-[10px] bg-zinc-800 hover:bg-zinc-700 text-zinc-400 px-2 py-0.5 rounded border border-zinc-700 transition-colors">RPG</button>
+                        <button type="button" onclick="quickAddTag('Platformer')" class="text-[10px] bg-zinc-800 hover:bg-zinc-700 text-zinc-400 px-2 py-0.5 rounded border border-zinc-700 transition-colors">Plataforma</button>
+                        <button type="button" onclick="quickAddTag('Open World')" class="text-[10px] bg-zinc-800 hover:bg-zinc-700 text-zinc-400 px-2 py-0.5 rounded border border-zinc-700 transition-colors">Mundo Aberto</button>
+                        <button type="button" onclick="quickAddTag('Action')" class="text-[10px] bg-zinc-800 hover:bg-zinc-700 text-zinc-400 px-2 py-0.5 rounded border border-zinc-700 transition-colors">Ação</button>
+                    </div>
+                </div>
+>>>>>>> c469aadac8798afd2970f5365ac7397c71de7339
 
                     <div>
                         <label class="block text-sm font-medium text-gray-400 mb-1">Tempo por Slide (segundos)</label>
@@ -214,6 +248,10 @@
 
 <script>
     let currentSubreddits = [];
+<<<<<<< HEAD
+=======
+    let currentPromoTags = [];
+>>>>>>> c469aadac8798afd2970f5365ac7397c71de7339
 
     // Busca configurações atuais do servidor
     async function loadConfig() {
@@ -225,15 +263,27 @@
             document.getElementById('modulo_noticias').checked = data.modulo_noticias;
             document.getElementById('modulo_reddit').checked = data.modulo_reddit;
             document.getElementById('modulo_promocoes').checked = data.modulo_promocoes !== undefined ? data.modulo_promocoes : true;
+<<<<<<< HEAD
             
             document.getElementById('jogos_plataforma').value = data.jogos_plataforma;
             document.getElementById('promo_genero').value = data.promo_genero || 'todos';
+=======
+            document.getElementById('modulo_steam_random').checked = data.modulo_steam_random !== undefined ? data.modulo_steam_random : true;
+            
+            document.getElementById('jogos_plataforma').value = data.jogos_plataforma;
+>>>>>>> c469aadac8798afd2970f5365ac7397c71de7339
             document.getElementById('tempo_slide').value = data.tempo_slide;
             document.getElementById('porta_com').value = data.porta_com;
             document.getElementById('rotacao').value = data.rotacao !== undefined ? String(data.rotacao) : '-90';
 
             currentSubreddits = data.lista_subreddits || [];
+<<<<<<< HEAD
             renderSubreddits();
+=======
+            currentPromoTags = data.promo_generos || ['todos'];
+            renderSubreddits();
+            renderPromoTags();
+>>>>>>> c469aadac8798afd2970f5365ac7397c71de7339
         } catch (e) {
             console.error("Erro ao carregar configurações", e);
         }
@@ -268,14 +318,69 @@
         renderSubreddits();
     }
 
+<<<<<<< HEAD
+=======
+    function renderPromoTags() {
+        const container = document.getElementById('promoTagsContainer');
+        container.innerHTML = '';
+        currentPromoTags.forEach((tag, index) => {
+            const el = document.createElement('div');
+            el.className = "bg-zinc-800 border border-zinc-600 py-1 px-3 rounded-full flex items-center text-sm";
+            el.innerHTML = `
+                <span class="text-gray-300 mr-2">${tag}</span>
+                <button type="button" onclick="removePromoTag(${index})" class="text-red-400 hover:text-red-300 font-bold focus:outline-none">&times;</button>
+            `;
+            container.appendChild(el);
+        });
+    }
+
+    function addPromoTag() {
+        const input = document.getElementById('newPromoTag');
+        const val = input.value.trim();
+        if (val) {
+            // Remove 'todos' se estiver adicionando uma tag específica
+            if (currentPromoTags.length === 1 && currentPromoTags[0] === 'todos') {
+                currentPromoTags = [];
+            }
+            if (!currentPromoTags.includes(val)) {
+                currentPromoTags.push(val);
+                renderPromoTags();
+                input.value = '';
+            }
+        }
+    }
+
+    function quickAddTag(tag) {
+        if (currentPromoTags.length === 1 && currentPromoTags[0] === 'todos') {
+            currentPromoTags = [];
+        }
+        if (!currentPromoTags.includes(tag)) {
+            currentPromoTags.push(tag);
+            renderPromoTags();
+        }
+    }
+
+    function removePromoTag(index) {
+        currentPromoTags.splice(index, 1);
+        if (currentPromoTags.length === 0) currentPromoTags = ['todos'];
+        renderPromoTags();
+    }
+
+>>>>>>> c469aadac8798afd2970f5365ac7397c71de7339
     async function salvarConfiguracoes() {
         const config = {
             modulo_jogos: document.getElementById('modulo_jogos').checked,
             modulo_noticias: document.getElementById('modulo_noticias').checked,
             modulo_reddit: document.getElementById('modulo_reddit').checked,
             modulo_promocoes: document.getElementById('modulo_promocoes').checked,
+<<<<<<< HEAD
             jogos_plataforma: document.getElementById('jogos_plataforma').value,
             promo_genero: document.getElementById('promo_genero').value,
+=======
+            modulo_steam_random: document.getElementById('modulo_steam_random').checked,
+            jogos_plataforma: document.getElementById('jogos_plataforma').value,
+            promo_generos: currentPromoTags,
+>>>>>>> c469aadac8798afd2970f5365ac7397c71de7339
             tempo_slide: parseInt(document.getElementById('tempo_slide').value) || 12,
             porta_com: document.getElementById('porta_com').value,
             lista_subreddits: currentSubreddits,
